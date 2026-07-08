@@ -1239,9 +1239,27 @@
                 const lat = parseFloat(latInput.value);
                 const lon = parseFloat(lonInput.value);
                 if (lat && lon && mag > 0 && testEarthquakeData) {
-                    var dist = Math.round(111 * Math.sqrt((lat - testEarthquakeData.latitude) ** 2 + (lon - testEarthquakeData.longitude) ** 2));
-                    teDist.textContent = dist;
-                    var estInt = Math.min(Math.max(Math.round(mag * 1.5 - 2.5 - 2.0 * Math.log10(dist + 10) + 1.0), 0), 7);
+                    // 与服务端一致的 vincenty 近似距离（Haversine）
+                    var dLat = (lat - testEarthquakeData.latitude) * Math.PI / 180;
+                    var dLon = (lon - testEarthquakeData.longitude) * Math.PI / 180;
+                    var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(testEarthquakeData.latitude * Math.PI / 180) * Math.cos(lat * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+                    var dist = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                    teDist.textContent = Math.round(dist);
+
+                    // 与服务端 estimate_intensity 完全一致的算法
+                    var estInt = 0;
+                    if (mag > 0 && dist >= 0) {
+                        if (dist < 1) {
+                            estInt = Math.min(Math.max(Math.round(mag * 1.5 - 2.5), 0), 7);
+                        } else {
+                            var a_coef, b_coef, c_coef, d_coef;
+                            if (mag >= 7) { a_coef = 2.0; b_coef = 3.8; c_coef = 10; d_coef = -0.8; }
+                            else if (mag >= 6) { a_coef = 2.3; b_coef = 3.7; c_coef = 10; d_coef = -1.0; }
+                            else if (mag >= 5) { a_coef = 2.5; b_coef = 3.6; c_coef = 10; d_coef = -1.3; }
+                            else { a_coef = 2.5; b_coef = 3.8; c_coef = 12; d_coef = -1.2; }
+                            estInt = Math.min(Math.max(Math.round(a_coef * mag - b_coef * Math.log10(dist + c_coef) + d_coef), 0), 7);
+                        }
+                    }
                     teInt.textContent = estInt;
                     teArrival.textContent = Math.round(dist / 3.5) + "s";
                 }
