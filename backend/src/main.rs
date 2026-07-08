@@ -13,7 +13,8 @@ use axum::{
 use config::Config;
 use db::Database;
 use routes::{
-    AppState, health_handler, stats_handler, subscribe_handler, unsubscribe_by_path_handler,
+    AppState, get_subscription_handler, health_handler, stats_handler, subscribe_handler,
+    unsubscribe_by_path_handler,
 };
 use services::EarthquakeMonitor;
 use std::net::SocketAddr;
@@ -51,6 +52,10 @@ async fn main() -> Result<()> {
             delete(unsubscribe_by_path_handler),
         )
         .route("/api/stats", get(stats_handler))
+        .route(
+            "/api/subscription/{bark_id}",
+            get(get_subscription_handler),
+        )
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)

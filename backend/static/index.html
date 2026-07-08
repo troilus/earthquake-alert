@@ -416,6 +416,29 @@
                 }
             }
 
+            /* 订阅状态卡片 */
+            #status-section dl {
+                display: grid;
+                grid-template-columns: auto 1fr;
+                gap: 10px 20px;
+                margin-top: 4px;
+            }
+
+            #status-section dt {
+                font-size: 12px;
+                font-weight: 500;
+                color: var(--text-secondary);
+                white-space: nowrap;
+            }
+
+            #status-section dd {
+                font-size: 14px;
+                font-weight: 500;
+                color: var(--text-main);
+                font-family: "SF Mono", "Cascadia Code", ui-monospace, monospace;
+                word-break: break-all;
+            }
+
             /* 状态反馈区域 */
             .status-container {
                 margin-top: 24px;
@@ -794,6 +817,30 @@
                 </form>
             </div>
 
+            <div class="glass-card" id="status-section" style="display:none">
+                <h2>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </svg>
+                    订阅状态
+                </h2>
+                <dl>
+                    <dt>Bark Key</dt>
+                    <dd id="s-bark"></dd>
+                    <dt>Bark 服务器</dt>
+                    <dd id="s-server"></dd>
+                    <dt>订阅位置</dt>
+                    <dd id="s-pos"></dd>
+                    <dt>推送阈值</dt>
+                    <dd id="s-threshold"></dd>
+                    <dt>通知级别分段</dt>
+                    <dd id="s-ranges"></dd>
+                    <dt>更新时间</dt>
+                    <dd id="s-updated"></dd>
+                </dl>
+            </div>
+
             <footer>
                 <p>
                     数据驱动:
@@ -939,6 +986,42 @@
             passiveMax.addEventListener("input", syncRanges);
             activeMax.addEventListener("input", syncRanges);
 
+            // 订阅状态
+            const statusSection = document.getElementById("status-section");
+            const sBark = document.getElementById("s-bark");
+            const sServer = document.getElementById("s-server");
+            const sPos = document.getElementById("s-pos");
+            const sThreshold = document.getElementById("s-threshold");
+            const sRanges = document.getElementById("s-ranges");
+            const sUpdated = document.getElementById("s-updated");
+
+            const INTENSITY_LABELS = {
+                0: "烈度 0（所有预警）", 1: "烈度 1", 2: "烈度 2",
+                3: "烈度 3", 4: "烈度 4", 5: "烈度 5",
+            };
+
+            function updateStatusSection(sub) {
+                sBark.textContent = sub.bark_id;
+                sServer.textContent = sub.bark_api_url;
+                sPos.textContent = `${sub.latitude.toFixed(4)}, ${sub.longitude.toFixed(4)}`;
+                sThreshold.textContent = INTENSITY_LABELS[sub.min_intensity] || `烈度 ${sub.min_intensity}`;
+                sRanges.textContent = `被动: 0–${sub.passive_max} | 主动: ${sub.passive_max + 1}–${sub.active_max} | 强提醒: ${sub.active_max + 1}+`;
+                sUpdated.textContent = new Date(sub.created_at).toLocaleString("zh-CN");
+                statusSection.style.display = "";
+            }
+
+            async function fetchSubscription(barkId) {
+                try {
+                    const res = await fetch(`${API}/api/subscription/${encodeURIComponent(barkId)}`);
+                    const result = await res.json();
+                    if (res.ok && result.success) {
+                        updateStatusSection(result.data);
+                    }
+                } catch {
+                    // 静默失败，不显示状态
+                }
+            }
+
             // 提交订阅
             form.addEventListener("submit", async (e) => {
                 e.preventDefault();
@@ -974,6 +1057,7 @@
 
                     if (res.ok && result.success) {
                         showStatus("订阅成功！地震预警已生效。", "success");
+                        updateStatusSection(result.data);
                         localStorage.setItem("bark_id", data.bark_id);
                         localStorage.setItem(
                             "bark_api_url",
@@ -1037,6 +1121,7 @@
                         form.reset();
                         if (marker) map.removeLayer(marker);
                         localStorage.removeItem("bark_id");
+                        statusSection.style.display = "none";
                     } else {
                         showStatus(result.message || "取消订阅失败", "error");
                     }
@@ -1064,7 +1149,10 @@
             window.addEventListener("DOMContentLoaded", () => {
                 fetchStats();
                 const savedId = localStorage.getItem("bark_id");
-                if (savedId) document.getElementById("bark-id").value = savedId;
+                if (savedId) {
+                    document.getElementById("bark-id").value = savedId;
+                    fetchSubscription(savedId);
+                }
                 const savedApiUrl = localStorage.getItem("bark_api_url");
                 if (savedApiUrl)
                     document.getElementById("bark-api-url").value = savedApiUrl;

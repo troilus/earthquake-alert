@@ -231,6 +231,24 @@ pub async fn stats_handler(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
+/// 获取单个订阅信息
+pub async fn get_subscription_handler(
+    State(state): State<AppState>,
+    Path(bark_id): Path<String>,
+) -> impl IntoResponse {
+    let store = state.db.subscriptions();
+    match store.get_subscription(&bark_id) {
+        Ok(sub) => (
+            StatusCode::OK,
+            Json(ApiResponse::success("ok", Some(SubscribeResponse::from(sub)))),
+        ),
+        Err(_) => (
+            StatusCode::NOT_FOUND,
+            Json(ApiResponse::<SubscribeResponse>::error("订阅不存在")),
+        ),
+    }
+}
+
 /// 健康检查
 pub async fn health_handler() -> impl IntoResponse {
     (StatusCode::OK, Json(ApiResponse::<()>::success("OK", None)))
