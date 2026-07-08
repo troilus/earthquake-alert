@@ -675,13 +675,11 @@
                 position: fixed;
                 bottom: 24px;
                 right: 24px;
-                width: 48px;
-                height: 48px;
-                border-radius: 50%;
+                border-radius: 24px;
                 background: var(--primary);
                 color: #fff;
-                font-size: 22px;
-                font-weight: 700;
+                font-size: 13px;
+                font-weight: 600;
                 border: none;
                 cursor: pointer;
                 box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
@@ -689,11 +687,12 @@
                 transition: var(--transition);
                 display: flex;
                 align-items: center;
-                justify-content: center;
+                gap: 6px;
+                padding: 10px 18px;
             }
 
             .help-btn:hover {
-                transform: scale(1.1);
+                opacity: 0.9;
                 box-shadow: 0 6px 24px rgba(0, 113, 227, 0.4);
             }
 
@@ -789,9 +788,8 @@
                 .help-btn {
                     bottom: 16px;
                     right: 16px;
-                    width: 42px;
-                    height: 42px;
-                    font-size: 18px;
+                    padding: 8px 14px;
+                    font-size: 12px;
                 }
                 .help-modal {
                     padding: 24px;
@@ -839,7 +837,7 @@
                             required
                             autocomplete="off"
                         />
-                        <small>打开 Bark App → 设置 → 复制完整推送链接，粘贴到上方。</small>
+                        <small>打开 Bark App → 服务器 → 复制完整推送链接，粘贴到上方。</small>
                     </div>
 
                     <div class="field">
@@ -1074,7 +1072,14 @@
             </footer>
         </main>
 
-        <button class="help-btn" id="help-btn">?</button>
+        <button class="help-btn" id="help-btn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+            使用说明
+        </button>
         <div class="help-overlay" id="help-overlay">
             <div class="help-modal">
                 <h2>使用说明</h2>
