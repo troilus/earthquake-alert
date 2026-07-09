@@ -15,6 +15,7 @@ ENV SERVER_HOST=0.0.0.0 \
     SERVER_PORT=30010 \
     DB_PATH=./data/earthquake.db \
     BARK_API_URL=https://api.day.app \
+    EEW_WEBSOCKET_URL=wss://ws-api.wolfx.jp/all_eew \
     MAX_CONCURRENT_NOTIFICATIONS=1000 \
     BATCH_SIZE=5000 \
     HTTP_POOL_SIZE=200

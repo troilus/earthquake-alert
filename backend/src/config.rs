@@ -13,6 +13,8 @@ pub struct Config {
     pub batch_size: usize,
     /// HTTP 连接池大小
     pub http_pool_size: usize,
+    /// EEW WebSocket 服务器地址
+    pub eew_websocket_url: String,
 }
 
 impl Config {
@@ -40,6 +42,8 @@ impl Config {
                 .unwrap_or_else(|_| "200".to_string())
                 .parse()
                 .unwrap_or(200),
+            eew_websocket_url: env::var("EEW_WEBSOCKET_URL")
+                .unwrap_or_else(|_| "wss://ws-api.wolfx.jp/all_eew".to_string()),
         }
     }
 }

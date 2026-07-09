@@ -146,6 +146,7 @@ async fn main() -> Result<()> {
     let monitor = EarthquakeMonitor::new(
         db,
         config.bark_api_url.clone(),
+        config.eew_websocket_url.clone(),
         config.http_pool_size,
         config.max_concurrent_notifications,
         config.batch_size,

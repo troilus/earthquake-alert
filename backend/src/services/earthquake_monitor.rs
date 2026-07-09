@@ -10,13 +10,13 @@ use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-const EEW_WEBSOCKET_URL: &str = "wss://ws-api.wolfx.jp/all_eew";
 const RECONNECT_DELAY: Duration = Duration::from_secs(5);
 
 /// 地震监控服务（支持百万级并发）
 pub struct EarthquakeMonitor {
     db: Database,
     bark_notifier: BarkNotifier,
+    eew_websocket_url: String,
     max_concurrent: usize,
     semaphore: Arc<Semaphore>,
 }
@@ -25,6 +25,7 @@ impl EarthquakeMonitor {
     pub fn new(
         db: Database,
         bark_api_url: String,
+        eew_websocket_url: String,
         http_pool_size: usize,
         max_concurrent: usize,
         _batch_size: usize,
@@ -42,6 +43,7 @@ impl EarthquakeMonitor {
         Self {
             db,
             bark_notifier,
+            eew_websocket_url,
             max_concurrent,
             semaphore,
         }
@@ -68,8 +70,8 @@ impl EarthquakeMonitor {
 
     /// 连接并监控 WebSocket
     async fn connect_and_monitor(&self) -> Result<()> {
-        let (ws_stream, _) = connect_async(EEW_WEBSOCKET_URL).await?;
-        tracing::info!("WebSocket 已连接到: {}", EEW_WEBSOCKET_URL);
+        let (ws_stream, _) = connect_async(&self.eew_websocket_url).await?;
+        tracing::info!("WebSocket 已连接到: {}", self.eew_websocket_url);
 
         let (mut _write, mut read) = ws_stream.split();
 
