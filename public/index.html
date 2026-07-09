@@ -899,11 +899,6 @@
       locationNotice.textContent = message;
     }
 
-    function showKeyNotice(message, type = "info") {
-      keyNotice.className = "key-notice visible" + (type === "success" ? " success" : "");
-      keyNotice.textContent = message;
-    }
-
     function setPosition(lat, lon, zoom = 10) {
       const y = Number(lat);
       const x = Number(lon);
@@ -1207,44 +1202,14 @@
       }
     }
 
-    async function normalizeBarkInput(visible = false) {
-      if (barkNormalizeBusy) return extractBarkKey(barkInput.value);
+    async function normalizeBarkInput() {
       const raw = barkInput.value;
-      const parsed = parseBarkInput(barkInput.value);
+      const parsed = parseBarkInput(raw);
       const key = parsed.key;
-      selectedBarkServer = parsed.server || defaultBarkServer;
-      const shouldConvert = key && key !== raw.trim() && raw.includes("://");
-      if (shouldConvert && visible) {
-        barkNormalizeBusy = true;
-        showKeyNotice("检测到 Bark 链接，正在提取 Key...");
-        show("检测到 Bark 链接，正在提取 Key...", "info");
-        await delay(650);
-      }
-      if (key && key !== barkInput.value) barkInput.value = key;
-      if (shouldConvert && visible) {
-        showKeyNotice("已从 Bark 链接提取并转换为 Key。", "success");
-        show("已从 Bark 链接提取并转换为 Key。", "success");
-        barkNormalizeBusy = false;
+      if (raw.includes("://")) {
+        selectedBarkServer = parsed.server || defaultBarkServer;
       }
       return key;
-    }
-
-    async function verifyBarkKey(visible = true) {
-      const key = await normalizeBarkInput(false);
-      const seq = ++keyVerifySeq;
-      if (!key) return;
-      if (visible) showKeyNotice("正在验证 Bark Key...");
-      try {
-        const res = await fetch(api + "/api/bark-key/" + encodeURIComponent(key));
-        const json = await res.json();
-        if (seq !== keyVerifySeq) return;
-        if (!res.ok || !json.success) throw new Error(json.message || "Bark Key 验证失败");
-        showKeyNotice("Bark Key 已验证。", "success");
-        await syncSubscriptionFromServer(key, visible);
-      } catch (err) {
-        if (seq !== keyVerifySeq) return;
-        showKeyNotice(err.message || "Bark Key 验证失败。");
-      }
     }
 
     async function syncSubscriptionFromServer(key, visible = false) {
@@ -1604,12 +1569,14 @@
       );
     });
 
-    barkInput.addEventListener("blur", () => verifyBarkKey(true));
+    barkInput.addEventListener("blur", () => {});
     barkInput.addEventListener("input", () => {
       keyVerifySeq++;
-      if (barkInput.value.includes("://")) normalizeBarkInput(true).then(() => verifyBarkKey(true));
+      if (barkInput.value.includes("://")) normalizeBarkInput();
     });
-    barkInput.addEventListener("paste", () => setTimeout(() => normalizeBarkInput(true).then(() => verifyBarkKey(true)), 0));
+    barkInput.addEventListener("paste", () => setTimeout(() => {
+      if (barkInput.value.includes("://")) normalizeBarkInput();
+    }, 0));
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();

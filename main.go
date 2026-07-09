@@ -781,22 +781,7 @@ func serveHTTP(cfg Config, store *Store, alertCache *AlertCache, notifier *Notif
 			writeJSON(w, http.StatusBadRequest, APIResponse{Success: false, Message: err.Error()})
 			return
 		}
-		existingSub, exists := store.Get(sub.BarkID)
-		if exists && isOfficialBarkServer(existingSub.BarkServer) && isSelfHostedBarkServer(sub.BarkServer, cfg) {
-			sub.BarkServer = existingSub.BarkServer
-		}
-		if !exists && isSelfHostedBarkServer(sub.BarkServer, cfg) {
-			ok, err := selfHostedBarkKeyExists(cfg, sub.BarkID)
-			if err != nil {
-				log.Printf("verify bark key failed key=%s: %v", maskKey(sub.BarkID), err)
-				writeJSON(w, http.StatusServiceUnavailable, APIResponse{Success: false, Message: "暂时无法验证 Bark Key，请稍后再试"})
-				return
-			}
-			if !ok {
-				writeJSON(w, http.StatusBadRequest, APIResponse{Success: false, Message: "未找到这个 Bark Key，请先在 Bark App 添加自建服务器并复制该服务器生成的 Key"})
-				return
-			}
-		}
+		_, exists := store.Get(sub.BarkID)
 		if err := validateSubscription(sub); err != nil {
 			writeJSON(w, http.StatusBadRequest, APIResponse{Success: false, Message: err.Error()})
 			return
@@ -1391,11 +1376,7 @@ func normalizeBarkInput(value, preferredServer string, cfg Config) (string, stri
 		if err != nil || parsed.Host == "" {
 			return "", "", errors.New("Bark URL 无效")
 		}
-		urlServer := strings.TrimRight(parsed.Scheme+"://"+strings.ToLower(parsed.Host), "/")
-		if !isAllowedBarkServer(urlServer, cfg) {
-			return "", "", errors.New("仅支持 api.day.app 或本服务自建 Bark URL")
-		}
-		server = urlServer
+		server = strings.TrimRight(parsed.Scheme+"://"+strings.ToLower(parsed.Host), "/")
 		parts := strings.Split(strings.Trim(parsed.EscapedPath(), "/"), "/")
 		if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
 			return "", "", errors.New("Bark URL 中未找到 Key")
@@ -1425,22 +1406,6 @@ func normalizeBarkServer(server string, cfg Config) string {
 		server = "https://api.day.app"
 	}
 	return server
-}
-
-func isAllowedBarkServer(server string, cfg Config) bool {
-	server = normalizeBarkServer(server, cfg)
-	for _, allowed := range []string{cfg.Bark.Server, cfg.Bark.SelfHostedServer, "https://api.day.app"} {
-		if server == normalizeBarkServer(allowed, cfg) {
-			return true
-		}
-	}
-	return false
-}
-
-func isSelfHostedBarkServer(server string, cfg Config) bool {
-	server = normalizeBarkServer(server, cfg)
-	selfHosted := strings.TrimRight(strings.TrimSpace(cfg.Bark.SelfHostedServer), "/")
-	return selfHosted != "" && server == selfHosted
 }
 
 func isOfficialBarkServer(server string) bool {
