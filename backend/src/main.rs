@@ -86,7 +86,7 @@ async fn main() -> Result<()> {
             .timeout(std::time::Duration::from_secs(15))
             .build()
             .unwrap();
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(1800));
         // 启动后立即拉取一次
         interval.tick().await;
         loop {
