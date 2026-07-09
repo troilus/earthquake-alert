@@ -2,7 +2,7 @@ name: Build & Release
 
 on:
   push:
-    branches: [main, master]
+    branches: [原项目自修改版]
   workflow_dispatch:
     inputs:
       version:
