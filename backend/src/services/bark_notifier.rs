@@ -139,6 +139,34 @@ impl BarkNotifier {
             .await
     }
 
+    /// 发送订阅成功确认通知
+    pub async fn send_subscription_confirm(&self, subscription: &Subscription) -> Result<()> {
+        let title = "地震预警订阅成功";
+        let subtitle = if subscription.locations.len() > 1 {
+            format!("已保存 {} 个监测地点", subscription.locations.len())
+        } else if subscription.location_name.trim().is_empty() {
+            "已保存监测地点".to_string()
+        } else {
+            format!("已保存 {}", subscription.location_name.trim())
+        };
+        let mut lines = vec!["你将按当前通知级别规则接收地震预警。".to_string()];
+        for location in subscription.normalized_locations() {
+            let name = if location.name.trim().is_empty() {
+                "未命名地点"
+            } else {
+                location.name.trim()
+            };
+            lines.push(format!(
+                "{}: {:.4}, {:.4}",
+                name, location.latitude, location.longitude
+            ));
+        }
+        let body = lines.join("\n");
+
+        self.send_notification(&subscription.bark_id, "active", title, &subtitle, &body)
+            .await
+    }
+
     /// 发送 Bark 通知（支持重试）
     async fn send_notification(
         &self,

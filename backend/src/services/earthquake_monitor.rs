@@ -3,7 +3,7 @@ use crate::db::Database;
 use crate::models::{
     CommonEarthquakeInfo, EarthquakeData, Subscription, WebSocketMessage, mask_bark_id,
 };
-use crate::services::{AlertTiming, BarkNotifier, BarkPushConfig};
+use crate::services::{AlertTiming, BarkNotifier};
 use crate::utils::{distance, geohash, intensity};
 use anyhow::Result;
 use futures::stream::{self, StreamExt};
@@ -48,20 +48,7 @@ pub struct EarthquakeMonitor {
 }
 
 impl EarthquakeMonitor {
-    pub fn new(db: Database, config: Config) -> Result<Self> {
-        let subscription_store = db.subscriptions();
-        let push_config = BarkPushConfig {
-            sound: config.bark_sound.clone(),
-            volume: config.bark_volume,
-            group: config.bark_group.clone(),
-            call: config.bark_call,
-        };
-        let bark_notifier = BarkNotifier::new(
-            config.bark_api_url.clone(),
-            config.http_pool_size,
-            subscription_store,
-            push_config,
-        )?;
+    pub fn new(db: Database, config: Config, bark_notifier: BarkNotifier) -> Result<Self> {
         let max_concurrent = config.max_concurrent_notifications.max(1);
         let semaphore = Arc::new(Semaphore::new(max_concurrent));
         let monitor_config = MonitorConfig {

@@ -3,6 +3,7 @@ use crate::models::{
     ApiResponse, NotificationBand, SubscribeRequest, Subscription, SubscriptionLocation,
     UnsubscribeRequest, mask_bark_id, validate_bark_level,
 };
+use crate::services::BarkNotifier;
 use crate::utils::distance;
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::Serialize;
@@ -11,6 +12,7 @@ use serde::Serialize;
 #[derive(Clone)]
 pub struct AppState {
     pub db: Database,
+    pub bark_notifier: BarkNotifier,
 }
 
 /// 订阅处理器
@@ -84,6 +86,24 @@ pub async fn subscribe_handler(
     let store = state.db.subscriptions();
     match store.upsert_subscription(subscription.clone()) {
         Ok(_) => {
+            if let Err(error) = state
+                .bark_notifier
+                .send_subscription_confirm(&subscription)
+                .await
+            {
+                tracing::error!(
+                    "订阅成功确认推送失败 - Bark ID: {}, 错误: {:?}",
+                    mask_bark_id(&subscription.bark_id),
+                    error
+                );
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    Json(ApiResponse::<SubscribeResponse>::error(format!(
+                        "订阅已保存，但成功提醒发送失败: {}",
+                        error
+                    ))),
+                );
+            }
             tracing::info!(
                 "订阅成功 - Bark ID: {}",
                 mask_bark_id(&subscription.bark_id)

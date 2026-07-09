@@ -13,7 +13,7 @@ use axum::{
 use config::Config;
 use db::Database;
 use routes::{AppState, health_handler, stats_handler, subscribe_handler, unsubscribe_handler};
-use services::EarthquakeMonitor;
+use services::{BarkNotifier, BarkPushConfig, EarthquakeMonitor};
 use std::net::SocketAddr;
 use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -37,8 +37,24 @@ async fn main() -> Result<()> {
     let db = Database::open(&config.db_path)?;
     tracing::info!("数据库已打开: {}", config.db_path);
 
+    let push_config = BarkPushConfig {
+        sound: config.bark_sound.clone(),
+        volume: config.bark_volume,
+        group: config.bark_group.clone(),
+        call: config.bark_call,
+    };
+    let bark_notifier = BarkNotifier::new(
+        config.bark_api_url.clone(),
+        config.http_pool_size,
+        db.subscriptions(),
+        push_config,
+    )?;
+
     // 创建应用状态
-    let state = AppState { db: db.clone() };
+    let state = AppState {
+        db: db.clone(),
+        bark_notifier: bark_notifier.clone(),
+    };
 
     // 创建路由
     let app = Router::new()
@@ -60,7 +76,7 @@ async fn main() -> Result<()> {
     tracing::info!("服务器启动中: http://{}", addr);
 
     // 在后台任务中启动地震监控（支持百万级并发）
-    let monitor = EarthquakeMonitor::new(db, config.clone())?;
+    let monitor = EarthquakeMonitor::new(db, config.clone(), bark_notifier)?;
     tokio::spawn(async move {
         if let Err(e) = monitor.start().await {
             tracing::error!("地震监控服务错误: {:?}", e);

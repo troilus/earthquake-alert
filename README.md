@@ -77,6 +77,8 @@ wrangler deploy --env production
 
 * **订阅**: `POST /api/subscribe`
 
+订阅保存成功后，服务端会通过 Bark 向该 `bark_id` 发送一条订阅成功确认提醒。
+
 ```json
 {
   "bark_id": "key",
