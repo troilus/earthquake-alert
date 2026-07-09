@@ -1,7 +1,7 @@
 /// GeoHash 编码和邻居计算工具
 
 const BASE32: &[u8] = b"0123456789bcdefghjkmnpqrstuvwxyz";
-const PRECISION: usize = 3; // ~20km x 20km
+const PRECISION: usize = 2; // ~20km x 20km
 
 /// GeoHash 编码
 pub fn encode(lat: f64, lon: f64) -> String {
