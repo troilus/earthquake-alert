@@ -1,0 +1,22 @@
+services:
+  # 注意对齐使用image名，可根据使用情况微调
+  earthquake-backend:
+    image: ghcr.io/troilus/earthquake-alert:latest
+    container_name: earthquake-alert-backend
+    restart: unless-stopped
+    ports:
+      - "30010:30010"
+    # env_file:
+    #   - .env
+    volumes:
+      - ./data:/app/data
+      - .env:/app/.env
+    environment:
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=30010
+      - DB_PATH=./data/earthquake.db
+      - BARK_API_URL=https://api.day.app
+      - MAX_CONCURRENT_NOTIFICATIONS=1000
+      - BATCH_SIZE=5000
+      - HTTP_POOL_SIZE=200
+      - TZ=Asia/Shanghai

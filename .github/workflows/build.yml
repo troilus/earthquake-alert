@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release 版本号 (如 v0.2.0)，留空则自动生成'
+        description: "Release 版本号 (如 v0.2.0)，留空则自动生成"
         required: false
         type: string
 
@@ -29,22 +29,42 @@ jobs:
         run: cargo build --release
         working-directory: backend
 
-      - name: Upload artifact
+      # ----------------------------------------------------
+      # 拆分上传：确保不带任何多余的父级目录结构
+      # ----------------------------------------------------
+      - name: Upload artifact (Linux)
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
-          name: earthquake-alert-backend-${{ runner.os == 'Linux' && 'linux' || 'windows' }}
-          path: ${{ runner.os == 'Linux' && 'backend/target/release/earthquake-alert-backend' || 'backend/target/release/earthquake-alert-backend.exe' }}
+          name: earthquake-alert-backend-linux-artifact
+          path: backend/target/release/earthquake-alert-backend
+
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: earthquake-alert-backend-windows-artifact
+          path: backend/target/release/earthquake-alert-backend.exe
 
   release:
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write # 赋予推送 Docker 镜像到 GitHub Packages 的权限
     steps:
+      - uses: actions/checkout@v4 # 构建 Docker 镜像需要读取仓库里的 Dockerfile
+
+      # ----------------------------------------------------
+      # 分别下载两个平台的二进制文件
+      # ----------------------------------------------------
       - uses: actions/download-artifact@v4
         with:
-          pattern: earthquake-alert-backend-*
-          merge-multiple: true
+          name: earthquake-alert-backend-linux-artifact
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: earthquake-alert-backend-windows-artifact
 
       - name: Generate tag
         id: tag
@@ -55,6 +75,46 @@ jobs:
             echo "tag=v$(date +%Y%m%d.%H%M%S)" >> $GITHUB_OUTPUT
           fi
 
+      # ----------------------------------------------------
+      # 核心修复：重命名文件，与 Dockerfile 中的名字完全对应
+      # ----------------------------------------------------
+      - name: Prepare files for Docker & Release
+        run: |
+          mv earthquake-alert-backend earthquake-alert-backend-linux
+          mv earthquake-alert-backend.exe earthquake-alert-backend-windows.exe
+          chmod +x earthquake-alert-backend-linux
+
+      # ----------------------------------------------------
+      # 登录并推送 Docker 镜像
+      # ----------------------------------------------------
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=${{ steps.tag.outputs.tag }}
+            type=raw,value=latest
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      # ----------------------------------------------------
+      # 创建 GitHub Release
+      # ----------------------------------------------------
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
