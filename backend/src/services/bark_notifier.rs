@@ -255,11 +255,9 @@ impl BarkNotifier {
             "level": level,
         });
         if level != "passive" {
-            if self.push_config.volume > 0 {
-                payload["volume"] = serde_json::json!(self.push_config.volume);
-            }
+            payload["volume"] = serde_json::json!(self.push_config.volume);
             if self.push_config.call {
-                payload["call"] = serde_json::json!(1);
+                payload["call"] = serde_json::json!("1");
             }
             if let Some(sound) = &self.push_config.sound {
                 payload["sound"] = serde_json::json!(sound);

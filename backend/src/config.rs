@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use std::env;
-use url::{Host, Url};
+use url::Url;
 
 /// 应用配置
 #[derive(Debug, Clone)]
@@ -49,7 +49,7 @@ impl Config {
                 .filter(|value| !value.is_empty()),
             bark_volume: env_parse("BARK_VOLUME", 10)?,
             bark_group: env_string("BARK_GROUP", "地震预警"),
-            bark_call: env_bool("BARK_CALL", false)?,
+            bark_call: env_bool("BARK_CALL", true)?,
             eew_websocket_url: env_string("EEW_WEBSOCKET_URL", "wss://ws-api.wolfx.jp/all_eew"),
             reconnect_min_seconds: env_parse("RECONNECT_MIN_SECONDS", 1)?,
             reconnect_max_seconds: env_parse("RECONNECT_MAX_SECONDS", 30)?,
@@ -131,21 +131,16 @@ fn bark_url_allowlist() -> Result<Vec<String>> {
 
 pub fn normalize_bark_url(value: &str) -> Result<String> {
     let parsed = Url::parse(value.trim()).context("must be an absolute URL")?;
-    if parsed.scheme() != "https"
+    if !matches!(parsed.scheme(), "http" | "https")
         || parsed.host_str().is_none()
         || parsed.username() != ""
         || parsed.password().is_some()
-        || parsed.port().is_some()
-        || parsed.path() != "/"
         || parsed.query().is_some()
         || parsed.fragment().is_some()
     {
-        bail!("must be an HTTPS origin without credentials, port, path, query, or fragment");
+        bail!("must be an HTTP(S) URL without credentials, query, or fragment");
     }
-    if matches!(parsed.host(), Some(Host::Ipv4(_) | Host::Ipv6(_))) {
-        bail!("IP address hosts are not allowed");
-    }
-    Ok(parsed.origin().ascii_serialization())
+    Ok(parsed.as_str().trim_end_matches('/').to_string())
 }
 
 fn env_string(name: &str, default: &str) -> String {
@@ -194,26 +189,28 @@ mod tests {
     use super::normalize_bark_url;
 
     #[test]
-    fn normalizes_https_origins() -> anyhow::Result<()> {
+    fn normalizes_supported_bark_urls() -> anyhow::Result<()> {
         anyhow::ensure!(normalize_bark_url(" https://api.day.app/ ")? == "https://api.day.app");
         anyhow::ensure!(
             normalize_bark_url("https://BARK.EXAMPLE.COM")? == "https://bark.example.com"
+        );
+        anyhow::ensure!(
+            normalize_bark_url("http://192.168.1.10:8080/")? == "http://192.168.1.10:8080"
+        );
+        anyhow::ensure!(normalize_bark_url("http://[::1]:8080/")? == "http://[::1]:8080");
+        anyhow::ensure!(
+            normalize_bark_url("https://example.com/bark///")? == "https://example.com/bark"
         );
         Ok(())
     }
 
     #[test]
-    fn rejects_non_origin_and_unsafe_urls() {
+    fn rejects_unsafe_or_unsupported_urls() {
         for value in [
-            "http://api.day.app",
-            "https://api.day.app.evil.example/path",
             "https://api.day.app@evil.example",
-            "https://127.0.0.1:8443",
-            "https://127.0.0.1",
-            "https://[::1]",
-            "https://api.day.app/path",
             "https://api.day.app?target=localhost",
             "https://api.day.app/#fragment",
+            "ftp://api.day.app",
             "not-a-url",
         ] {
             assert!(normalize_bark_url(value).is_err(), "accepted {value:?}");

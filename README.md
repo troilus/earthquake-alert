@@ -102,7 +102,7 @@ set -a; . ./.env; set +a
 
 配置值会在启动时校验；数值格式错误、重连下限大于上限、非正波速、无效并发上限等会直接导致服务启动失败。
 
-`BARK_URL_ALLOWLIST` 中每项必须是纯 HTTPS origin，不允许凭据、端口、路径、查询参数或 fragment。配置顺序会原样提供给网页端；网页端首次使用时选择第一项。服务端不会把第一项当作发送失败或历史地址失效时的回退目标。
+`BARK_URL_ALLOWLIST` 支持 HTTP/HTTPS、域名或 IP、显式端口和反向代理子路径，例如 `https://api.day.app`、`http://192.168.1.10:8080`、`https://example.com/bark`。不允许凭据、查询参数或 fragment；末尾 `/` 会被移除，推送时统一追加 `/push`。配置顺序会原样提供给网页端；网页端首次使用时选择第一项。服务端不会把第一项当作发送失败或历史地址失效时的回退目标。
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -110,11 +110,11 @@ set -a; . ./.env; set +a
 | `SERVER_PORT` | `30010` | 服务端口 |
 | `ALLOWED_ORIGINS` | (空) | 允许跨域访问 API 的前端 Origin，多个值用逗号分隔；空表示不额外开放跨域 |
 | `DB_PATH` | `./data/earthquake.db` | 数据库路径 |
-| `BARK_URL_ALLOWLIST` | `https://api.day.app` | 前端可选的 Bark URL 有序白名单，多个值用逗号分隔；第一项仅作为网页端首次选择 |
+| `BARK_URL_ALLOWLIST` | `https://api.day.app` | 前端可选的 Bark 基础 URL 有序白名单，支持 HTTP/HTTPS、端口、IP 和反代子路径；多个值用逗号分隔 |
 | `BARK_SOUND` | (空) | Bark 铃声名称，空表示使用默认 |
 | `BARK_VOLUME` | `10` | Bark 推送音量 (0-10) |
 | `BARK_GROUP` | `地震预警` | Bark 推送分组名 |
-| `BARK_CALL` | `false` | 是否触发 Bark 通话级别推送 |
+| `BARK_CALL` | `true` | 是否触发 Bark 通话级别推送；默认重复播放通知铃声 |
 | `EEW_WEBSOCKET_URL` | `wss://ws-api.wolfx.jp/all_eew` | 地震预警 WebSocket 地址 |
 | `RECONNECT_MIN_SECONDS` | `1` | 重连最小间隔秒数 |
 | `RECONNECT_MAX_SECONDS` | `30` | 指数退避重连最大间隔秒数 |
