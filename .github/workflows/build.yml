@@ -27,7 +27,6 @@ jobs:
 
       - name: Build
         run: cargo build --release
-        working-directory: backend
 
       # ----------------------------------------------------
       # 拆分上传：确保不带任何多余的父级目录结构
@@ -37,14 +36,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: earthquake-alert-backend-linux-artifact
-          path: backend/target/release/earthquake-alert-backend
+          path: target/release/disaster-alert
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: earthquake-alert-backend-windows-artifact
-          path: backend/target/release/earthquake-alert-backend.exe
+          path: target/release/disaster-alert.exe
 
   release:
     needs: build
@@ -80,8 +79,8 @@ jobs:
       # ----------------------------------------------------
       - name: Prepare files for Docker & Release
         run: |
-          mv earthquake-alert-backend earthquake-alert-backend-linux
-          mv earthquake-alert-backend.exe earthquake-alert-backend-windows.exe
+          mv disaster-alert earthquake-alert-backend-linux
+          mv disaster-alert.exe earthquake-alert-backend-windows.exe
           chmod +x earthquake-alert-backend-linux
 
       # ----------------------------------------------------
