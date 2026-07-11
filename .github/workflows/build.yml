@@ -28,7 +28,7 @@ jobs:
       - name: Build
         run: cargo build --release
         env:
-          RUSTFLAGS: -C target-cpu=x86-64-v1
+          RUSTFLAGS: -C target-cpu=x86-64
 
       # ----------------------------------------------------
       # 拆分上传：确保不带任何多余的父级目录结构
