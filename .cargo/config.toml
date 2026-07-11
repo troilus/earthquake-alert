@@ -1,2 +1,6 @@
 [build]
 rustflags = ["-C", "target-cpu=x86-64"]
+
+[env]
+CFLAGS = "-march=x86-64"
+CXXFLAGS = "-march=x86-64"
