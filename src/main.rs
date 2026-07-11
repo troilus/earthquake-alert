@@ -28,6 +28,7 @@ use services::{
 };
 use std::net::SocketAddr;
 use std::time::Duration;
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -119,6 +120,7 @@ async fn run() -> Result<()> {
         .route("/api/stats", get(stats_handler))
         .route("/api/status", get(status_handler))
         .layer(cors)
+        .layer(CompressionLayer::new())
         .with_state(state);
 
     let addr: SocketAddr = format!("{}:{}", config.server_host, config.server_port)

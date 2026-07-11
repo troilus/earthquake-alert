@@ -42,7 +42,8 @@ flowchart LR
 
 ```text
 src/                   Rust 应用源代码
-web/index.html         Web 界面，通过 include_str! 编译进二进制
+web/index.html         Web 界面源文件
+build.rs               构建时压缩 Web 界面并写入 OUT_DIR
 Cargo.toml             Rust crate 和构建配置
 .env.example           环境变量示例
 ```

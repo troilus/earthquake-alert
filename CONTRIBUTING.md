@@ -5,7 +5,7 @@
 ## 改动边界
 
 - `src/` 包含完整 Rust 应用：订阅 API、WebSocket 监听、订阅匹配、Bark 推送和 Web 页面路由
-- `web/index.html` 是唯一 Web 界面源文件，通过 `include_str!` 编译进二进制
+- `web/index.html` 是唯一 Web 界面源文件，由 `build.rs` 压缩后通过 `include_str!` 编译进二进制
 - 仓库不维护特定平台的反向代理、进程守护或静态托管配置
 
 服务端行为和 Web 交互尽量分开改，跨层改动需要说明数据流如何变化
