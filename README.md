@@ -28,6 +28,7 @@ flowchart LR
 - `providers/` 是供应商边界。每个适配器只负责 WebSocket 生命周期、供应商协议解析和 `DisasterEvent` 标准化，不访问数据库或 Bark
 - `models/` 只包含共享灾害事件和当前订阅格式，不包含 Wolfx 或 FAN Studio 协议结构
 - `source_registry.rs` 是来源 ID、渠道、灾种和前端来源选项的唯一注册表
+- `lifecycle.rs` 统一管理进程信号、HTTP/provider/dispatcher 的关停顺序、任务回收和 sled 刷新
 - `DisasterDispatcher` 统一执行有界队列、跨渠道聚合、候选订阅索引查询、精确匹配、并发通知和有限重试
 - 队列满时对来源施加背压，并按事件版本合并更新，不丢弃已有预警；`/api/status` 可观察连接和背压计数
 - `EventAggregator` 只处理跨渠道事件关联与投递版本，不包含供应商协议判断
@@ -42,7 +43,9 @@ flowchart LR
 
 ```text
 src/                   Rust 应用源代码
-web/index.html         Web 界面，通过 include_str! 编译进二进制
+src/lifecycle.rs       进程生命周期和优雅关停协调器
+web/index.html         Web 界面源文件
+build.rs               构建时压缩 Web 界面并写入 OUT_DIR
 Cargo.toml             Rust crate 和构建配置
 .env.example           环境变量示例
 ```
@@ -53,24 +56,25 @@ Cargo.toml             Rust crate 和构建配置
 
 ```bash
 cp .env.example .env
-set -a; . ./.env; set +a
 cargo build --release
 ./target/release/disaster-alert
 ```
 
 默认监听 `0.0.0.0:30010`，浏览器访问 `http://your-server:30010` 即可使用。生产环境建议将 `SERVER_HOST` 设为 `127.0.0.1`，再由运行环境已有的反向代理提供 HTTPS；进程守护、域名和证书配置也由实际运行环境管理。
 
+sled 是本地嵌入式数据库：部署时必须持久化 `DB_PATH` 所在目录，且同一数据库目录只能由一个服务实例打开。当前版本不支持多个容器共享该数据库或水平扩容；`/health` 是唯一健康探针，只表示 HTTP 服务可响应。
+
 ## 配置
 
-应用通过环境变量配置。在仓库根目录创建 `.env`，运行前导入或通过进程管理器设置：
+应用启动时自动读取当前工作目录的 `.env`，也支持由 shell 或进程管理器设置环境变量。进程环境变量的优先级高于 `.env`，`.env` 不存在时使用进程环境变量或默认值：
 
 ```bash
 cp .env.example .env
-# 编辑 .env
-set -a; . ./.env; set +a
+vim .env
+./target/release/disaster-alert
 ```
 
-配置值会在启动时校验；数值格式错误、重连下限大于上限、非正波速、无效并发上限等会直接导致服务启动失败。
+配置值会在启动时校验；`.env` 语法错误、数值格式错误、重连下限大于上限、非正波速、无效并发上限等会直接导致服务启动失败。服务由其他目录启动时，需要将工作目录设置为 `.env` 所在目录，或直接通过进程管理器注入环境变量。
 
 `BARK_URL_ALLOWLIST` 支持 HTTP/HTTPS、域名或 IP、显式端口和反向代理子路径，例如 `https://api.day.app`、`http://192.168.1.10:8080`、`https://example.com/bark`。不允许凭据、查询参数或 fragment；末尾 `/` 会被移除，推送时统一追加 `/push`。配置顺序会原样提供给网页端；网页端首次使用时选择第一项。服务端不会把第一项当作发送失败或历史地址失效时的回退目标。
 
@@ -78,6 +82,7 @@ set -a; . ./.env; set +a
 | --- | --- | --- |
 | `SERVER_HOST` | `0.0.0.0` | 监听地址 |
 | `SERVER_PORT` | `30010` | 服务端口 |
+| `SHUTDOWN_TIMEOUT_SECONDS` | `15` | 任务排空的最长等待秒数，也是最终数据库刷新超时失败的判定阈值，范围 `1..=300`；已开始的刷新仍会完成后再退出 |
 | `ALLOWED_ORIGINS` | (空) | 允许跨域访问 API 的前端 Origin，多个值用逗号分隔；空表示不额外开放跨域 |
 | `DB_PATH` | `./data/disaster-alert.db` | 灾害订阅数据库路径 |
 | `BARK_URL_ALLOWLIST` | `https://api.day.app` | 前端可选的 Bark 基础 URL 有序白名单，支持 HTTP/HTTPS、端口、IP 和反代子路径；多个值用逗号分隔 |
@@ -109,7 +114,7 @@ set -a; . ./.env; set +a
 ```json
 {
   "success": true,
-  "message": "订阅成功",
+  "message": "订阅已保存，确认通知已发送",
   "data": {}
 }
 ```
@@ -120,7 +125,7 @@ set -a; . ./.env; set +a
 
 | 方法 | 路径 | 用途 | 成功响应 |
 | --- | --- | --- | --- |
-| `POST` | `/api/subscribe` | 发送 Bark 确认提醒成功后创建或覆盖订阅 | `200` |
+| `POST` | `/api/subscribe` | 发送 Bark 接收测试通知成功后创建或覆盖订阅 | `200` |
 | `GET` | `/api/bark-urls` | 返回网页端可选择的 Bark URL 白名单 | `200` |
 | `GET` | `/api/subscription-options` | 返回灾害类别、来源目录和默认阈值 | `200` |
 | `DELETE` | `/api/unsubscribe` | 按 Bark 服务与 Key 删除订阅 | `200` |
@@ -206,13 +211,15 @@ set -a; . ./.env; set +a
 - 地震速报沿用全局候选订阅匹配；天气、海啸和台风的空间匹配分别由规则字段决定
 - `/api/subscription-options` 返回按灾种组织的来源目录及每种规则的完整默认值，Web 界面以此生成配置
 - 订阅身份是 `destination.base_url` 与 `destination.device_key` 的组合；同一 Key 可用于不同 Bark 服务，分别保存和删除
+- 订阅和退订 JSON 请求体上限为 32 KiB；超限或结构无效时返回统一 JSON `400`
+- Bark 接收测试通知使用 `timeSensitive` 级别以提高即时横幅的可见性，但不会使用灾害专用的 `BARK_SOUND`、`BARK_VOLUME` 或 `BARK_CALL`；最终是否显示横幅仍取决于设备的 Bark 通知权限和系统设置
 
 成功响应：
 
 ```json
 {
   "success": true,
-  "message": "订阅成功",
+  "message": "订阅已保存，确认通知已发送",
   "data": { "saved": true }
 }
 ```
@@ -225,7 +232,7 @@ set -a; . ./.env; set +a
 | `400` | Bark URL 无效或不在白名单中 |
 | `400` | 没有有效监测地点 |
 | `400` | 灾害规则为空、类别重复、来源不属于对应灾种或阈值超出范围 |
-| `502` | Bark 确认提醒发送失败，订阅未保存 |
+| `502` | Bark 接收测试通知发送失败，订阅未保存 |
 | `500` | 数据库存储失败 |
 
 ### `DELETE /api/unsubscribe`

@@ -1,5 +1,6 @@
 mod config;
 mod db;
+mod lifecycle;
 mod models;
 mod providers;
 mod routes;
@@ -10,10 +11,11 @@ mod utils;
 use anyhow::{Context, Result};
 use axum::{
     Router,
+    extract::DefaultBodyLimit,
     http::{HeaderValue, Method},
     routing::{delete, get, post},
 };
-use config::Config;
+use config::{Config, load_dotenv};
 use db::Database;
 use providers::{FanStudioSource, WolfxSource};
 use routes::{
@@ -27,11 +29,15 @@ use services::{
 };
 use std::net::SocketAddr;
 use std::time::Duration;
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-#[tokio::main]
-async fn main() -> Result<()> {
+const SUBSCRIPTION_BODY_LIMIT_BYTES: usize = 32 * 1024;
+
+fn main() -> Result<()> {
+    let dotenv_path = load_dotenv().context("failed to load .env configuration")?;
+
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -40,6 +46,20 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    if let Some(path) = dotenv_path {
+        tracing::info!(event = "config.dotenv_loaded", path = %path.display(), "config.dotenv_loaded");
+    }
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("failed to create Tokio runtime")?;
+    let result = runtime.block_on(run());
+    runtime.shutdown_timeout(lifecycle::FORCED_SHUTDOWN_TIMEOUT);
+    result
+}
+
+async fn run() -> Result<()> {
     let config = Config::from_env().context("failed to load configuration")?;
     tracing::info!(
         event = "config.loaded",
@@ -86,17 +106,24 @@ async fn main() -> Result<()> {
         .route("/", get(index_handler))
         .route("/index.html", get(index_handler))
         .route("/health", get(health_handler))
-        .route("/api/subscribe", post(subscribe_handler))
+        .route(
+            "/api/subscribe",
+            post(subscribe_handler).layer(DefaultBodyLimit::max(SUBSCRIPTION_BODY_LIMIT_BYTES)),
+        )
         .route("/api/bark-urls", get(bark_urls_handler))
         .route("/api/reverse-geocode", get(reverse_geocode_handler))
         .route(
             "/api/subscription-options",
             get(subscription_options_handler),
         )
-        .route("/api/unsubscribe", delete(unsubscribe_handler))
+        .route(
+            "/api/unsubscribe",
+            delete(unsubscribe_handler).layer(DefaultBodyLimit::max(SUBSCRIPTION_BODY_LIMIT_BYTES)),
+        )
         .route("/api/stats", get(stats_handler))
         .route("/api/status", get(status_handler))
         .layer(cors)
+        .layer(CompressionLayer::new())
         .with_state(state);
 
     let addr: SocketAddr = format!("{}:{}", config.server_host, config.server_port)
@@ -104,6 +131,10 @@ async fn main() -> Result<()> {
         .context("failed to parse listen address")?;
 
     tracing::info!(event = "server.starting", listen_addr = %addr, "server.starting");
+
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .context("failed to bind HTTP listener")?;
 
     let dedup_keep_seconds = config
         .dedup_keep_minutes
@@ -118,44 +149,17 @@ async fn main() -> Result<()> {
         runtime_status.clone(),
     );
     let wolfx = WolfxSource::new(&config, dispatcher.clone(), runtime_status.clone());
-    let fanstudio = FanStudioSource::new(&config, dispatcher.clone(), runtime_status);
-    let dispatcher_handle = tokio::spawn(async move { dispatcher.run().await });
-    let wolfx_handle = tokio::spawn(async move { wolfx.run().await });
-    let fanstudio_handle = tokio::spawn(async move { fanstudio.run().await });
-
-    let listener = tokio::net::TcpListener::bind(&addr)
-        .await
-        .context("failed to bind HTTP listener")?;
-    let server = axum::serve(listener, app);
-
-    tokio::select! {
-        result = server => {
-            result.context("HTTP server failed")?;
-        }
-        result = dispatcher_handle => {
-            match result {
-                Ok(Ok(())) => tracing::warn!(event = "dispatcher.task_finished", "dispatcher.task_finished"),
-                Ok(Err(error)) => return Err(error).context("dispatcher task failed"),
-                Err(error) => return Err(error).context("dispatcher task panicked"),
-            }
-        }
-        result = wolfx_handle => {
-            match result {
-                Ok(Ok(())) => anyhow::bail!("Wolfx provider terminated unexpectedly"),
-                Ok(Err(error)) => return Err(error).context("Wolfx provider failed"),
-                Err(error) => return Err(error).context("Wolfx provider panicked"),
-            }
-        }
-        result = fanstudio_handle => {
-            match result {
-                Ok(Ok(())) => anyhow::bail!("Fan Studio provider terminated unexpectedly"),
-                Ok(Err(error)) => return Err(error).context("Fan Studio provider failed"),
-                Err(error) => return Err(error).context("Fan Studio provider panicked"),
-            }
-        }
-    }
-
-    Ok(())
+    let fanstudio = FanStudioSource::new(&config, dispatcher.clone(), runtime_status.clone());
+    lifecycle::run_until_shutdown(
+        listener,
+        app,
+        db,
+        dispatcher,
+        wolfx,
+        fanstudio,
+        Duration::from_secs(config.shutdown_timeout_seconds),
+    )
+    .await
 }
 
 fn build_cors_layer(config: &Config) -> Result<CorsLayer> {
