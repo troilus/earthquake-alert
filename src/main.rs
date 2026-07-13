@@ -21,7 +21,7 @@ use providers::{FanStudioSource, WolfxSource};
 use routes::{
     AppState, bark_urls_handler, health_handler, index_handler, reverse_geocode_handler,
     stats_handler, status_handler, subscribe_handler, subscription_options_handler,
-    unsubscribe_handler,
+    test_alert_handler, unsubscribe_handler,
 };
 use services::{
     BarkNotifier, BarkPushConfig, DisasterDispatcher, EventAggregator, ReverseGeocoder,
@@ -109,6 +109,10 @@ async fn run() -> Result<()> {
         .route(
             "/api/subscribe",
             post(subscribe_handler).layer(DefaultBodyLimit::max(SUBSCRIPTION_BODY_LIMIT_BYTES)),
+        )
+        .route(
+            "/api/test-alert",
+            post(test_alert_handler).layer(DefaultBodyLimit::max(SUBSCRIPTION_BODY_LIMIT_BYTES)),
         )
         .route("/api/bark-urls", get(bark_urls_handler))
         .route("/api/reverse-geocode", get(reverse_geocode_handler))

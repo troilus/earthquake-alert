@@ -450,6 +450,14 @@ pub struct SubscribeRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct TestAlertRequest {
+    pub destination: NotificationDestination,
+    pub targets: Vec<MonitoringTarget>,
+    pub alert: AlertRule,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UnsubscribeRequest {
     pub destination: NotificationDestination,
 }

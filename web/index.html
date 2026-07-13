@@ -590,6 +590,8 @@
     .disaster-category { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: color-mix(in srgb, var(--panel) 94%, var(--bg)); }
     .disaster-category.is-disabled { background: color-mix(in srgb, var(--soft) 52%, transparent); }
     .disaster-category-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; min-height: 68px; }
+    .category-actions { display: flex; align-items: center; gap: 4px; padding-right: 8px; }
+    .rule-test-button { width: auto; height: 32px; padding: 0 10px; border-radius: 6px; color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, var(--panel)); font-size: 12px; font-weight: 800; white-space: nowrap; }
     .category-expand {
       display: flex;
       align-items: center;
@@ -641,7 +643,7 @@
     .intensity-rules { display: grid; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
     .intensity-rule {
       display: grid;
-      grid-template-columns: 56px minmax(0, 1fr) 28px;
+      grid-template-columns: 56px minmax(0, 1fr) auto;
       gap: 10px;
       align-items: end;
       padding: 10px;
@@ -651,6 +653,8 @@
     .intensity-rule-header { display: flex; align-items: center; min-height: 40px; }
     .intensity-rule-name { color: var(--muted); font-size: 12px; font-weight: 850; }
     .remove-intensity-rule { width: 28px; height: 28px; min-width: 28px; border-radius: 6px; font-size: 17px; line-height: 1; }
+    .intensity-rule-actions { display: flex; align-items: center; gap: 5px; }
+    .test-intensity-rule { width: auto; height: 32px; padding: 0 9px; border-radius: 6px; color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, var(--panel)); font-size: 12px; font-weight: 800; white-space: nowrap; }
     .intensity-rule-fields { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(130px, .8fr); gap: 10px; }
     .intensity-range { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 6px; align-items: center; }
     .intensity-range span { color: var(--muted); font-size: 12px; font-weight: 750; white-space: nowrap; }
@@ -673,7 +677,8 @@
     }
     .notify-warning.show { display: block; }
     @media (max-width: 640px) {
-      .intensity-rule { grid-template-columns: 44px minmax(0, 1fr) 28px; align-items: start; }
+      .intensity-rule { grid-template-columns: 44px minmax(0, 1fr); align-items: start; }
+      .intensity-rule-actions { grid-column: 2; justify-content: flex-end; }
       .intensity-rule-fields { grid-template-columns: 1fr; }
       .intensity-actions { width: auto; }
       .intensity-actions button { flex: 0 0 auto; }
@@ -859,6 +864,7 @@
       submit.disabled = inFlight || !configurationReady;
       unsubscribe.disabled = inFlight;
       resetAlertRules.disabled = inFlight || !configurationReady;
+      disasterGroupsEl.querySelectorAll("[data-test-category], [data-test-band]").forEach((button) => { button.disabled = inFlight || button.dataset.ruleDisabled === "true"; });
       startAddLocation.disabled = inFlight || subscriptionDraft.targets.length >= 3 || uiState.locationMode !== "overview";
       finishLocation.disabled = inFlight || (uiState.locationMode !== "overview" && !targetCoordinates(activeTarget()));
       discardLocationEdit.disabled = inFlight;
@@ -1593,10 +1599,13 @@
                 <span class="category-meta">${disabled ? "已关闭" : `${escapeHtml(sourceSummary)}${ruleSummary ? ` · ${escapeHtml(ruleSummary)}` : ""}`}</span>
               </span>
             </button>
-            <label class="switch" aria-label="${escapeHtml(disabled ? `启用${category.label}` : `停用${category.label}`)}">
-              <input class="category-toggle" data-category="${escapeHtml(category.id)}" type="checkbox" ${disabled ? "" : "checked"}>
-              <span class="switch-track"></span>
-            </label>
+            <span class="category-actions">
+              ${category.id === "earthquake_warning" ? "" : `<button class="rule-test-button" type="button" data-test-category="${escapeHtml(category.id)}" data-rule-disabled="${disabled}" ${disabled || subscriptionRequestInFlight ? "disabled" : ""}>测试通知</button>`}
+              <label class="switch" aria-label="${escapeHtml(disabled ? `启用${category.label}` : `停用${category.label}`)}">
+                <input class="category-toggle" data-category="${escapeHtml(category.id)}" type="checkbox" ${disabled ? "" : "checked"}>
+                <span class="switch-track"></span>
+              </label>
+            </span>
           </div>
           <div class="disaster-detail" ${expanded ? "" : "hidden"}>
             <div class="source-overview">
@@ -1767,7 +1776,10 @@
               </select>
             </label>
           </div>
-          <button class="remove-intensity-rule" type="button" data-action="remove-rule" aria-label="删除规则 ${escapeHtml(index + 1)}" title="删除规则" ${state}>×</button>
+          <span class="intensity-rule-actions">
+            <button class="test-intensity-rule" type="button" data-test-band="${escapeHtml(index)}" data-rule-disabled="${state ? "true" : "false"}" ${state}>测试</button>
+            <button class="remove-intensity-rule" type="button" data-action="remove-rule" aria-label="删除规则 ${escapeHtml(index + 1)}" title="删除规则" ${state}>×</button>
+          </span>
         </div>
       `).join("");
     }
@@ -2111,7 +2123,61 @@
       show("预警规则已恢复默认设置", "success");
     });
 
-    disasterGroupsEl.addEventListener("click", (event) => {
+    disasterGroupsEl.addEventListener("click", async (event) => {
+      const testButton = event.target.closest("[data-test-category], [data-test-band]");
+      if (testButton) {
+        const bandIndex = testButton.dataset.testBand;
+        const category = bandIndex === undefined ? testButton.dataset.testCategory : "earthquake_warning";
+        if (!configurationReady || subscriptionRequestInFlight) return;
+        if (!alertEntry(category)?.enabled) return show("请先启用该预警类别", "error");
+        if (category === "earthquake_warning" && !commitBands()) return show("请修正通知级别规则", "error");
+        if (!subscriptionDraft.targets.length) return show("请至少添加一个监测地点", "error");
+        const locationError = validateLocations(subscriptionDraft.targets);
+        if (locationError) return show(locationError, "error");
+        const barkID = barkInput.value.trim();
+        if (!/^[A-Za-z0-9]{1,64}$/.test(barkID)) return show("Bark Key 只能包含字母和数字", "error");
+        const barkUrl = barkUrlInput.value;
+        if (!barkUrls.includes(barkUrl)) return show("请选择有效的 Bark URL", "error");
+        const rule = alertRuleForPayload(alertRule(category));
+        if (bandIndex !== undefined) {
+          const band = rule.estimated_intensity_bands[Number(bandIndex)];
+          if (!band) return show("找不到当前烈度规则", "error");
+          rule.estimated_intensity_bands = [band];
+        }
+        if (rule.sources?.mode === "include" && !rule.sources.ids.length) return show("请至少选择一个数据来源", "error");
+        const payload = {
+          destination: { type: "bark", base_url: barkUrl, device_key: barkID },
+          targets: subscriptionDraft.targets.map((target) => ({
+            label: target.label.trim(),
+            point: { latitude: Number(target.point.latitude), longitude: Number(target.point.longitude) },
+            region: {
+              province: target.region.province.trim(), city: target.region.city.trim(), district: target.region.district.trim(),
+            },
+          })),
+          alert: rule,
+        };
+        setSubscriptionRequestInFlight(true);
+        const testLabel = bandIndex === undefined
+          ? optionCategories.find((item) => item.id === category)?.label || ""
+          : `地震预警规则 ${Number(bandIndex) + 1}`;
+        show(`正在发送${testLabel}测试通知...`, "info");
+        try {
+          const res = await fetch(api + "/api/test-alert", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const json = await parseApiResponse(res);
+          if (!res.ok || !json.success) throw new Error(json.message || "测试通知发送失败");
+          show(json.message || "测试预警已发送", "success");
+        } catch (error) {
+          show(error.message || "网络请求失败", "error");
+        } finally {
+          setSubscriptionRequestInFlight(false);
+        }
+        return;
+      }
+
       const expand = event.target.closest("[data-expand-category]");
       if (expand) {
         const card = expand.closest("[data-category-card]");

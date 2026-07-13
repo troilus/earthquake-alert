@@ -126,6 +126,7 @@ vim .env
 | 方法 | 路径 | 用途 | 成功响应 |
 | --- | --- | --- | --- |
 | `POST` | `/api/subscribe` | 发送 Bark 接收测试通知成功后创建或覆盖订阅 | `200` |
+| `POST` | `/api/test-alert` | 使用当前页面的单条灾害规则发送模拟预警，不保存订阅 | `200` |
 | `GET` | `/api/bark-urls` | 返回网页端可选择的 Bark URL 白名单 | `200` |
 | `GET` | `/api/subscription-options` | 返回灾害类别、来源目录和默认阈值 | `200` |
 | `DELETE` | `/api/unsubscribe` | 按 Bark 服务与 Key 删除订阅 | `200` |
