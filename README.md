@@ -90,6 +90,7 @@ vim .env
 | `BARK_VOLUME` | `10` | Bark 推送音量 (0-10) |
 | `BARK_GROUP` | `灾害预警` | Bark 推送分组名 |
 | `BARK_CALL` | `true` | 是否触发 Bark 通话级别推送；默认重复播放通知铃声 |
+| `BARK_ICON_URL` | (空) | Bark 通知图标的公网 HTTPS 地址，例如 `https://your-domain.example/img/icon.png` |
 | `WOLFX_WEBSOCKET_URL` | `wss://ws-api.wolfx.jp/all_eew` | Wolfx 聚合地震预警 WebSocket 地址 |
 | `FANSTUDIO_WEBSOCKET_URL` | `wss://ws.fanstudio.tech/all` | FAN Studio 单一聚合 WebSocket 地址，必须使用 `/all` 端点 |
 | `RECONNECT_MIN_SECONDS` | `1` | 重连最小间隔秒数 |
@@ -126,6 +127,7 @@ vim .env
 | 方法 | 路径 | 用途 | 成功响应 |
 | --- | --- | --- | --- |
 | `POST` | `/api/subscribe` | 发送 Bark 接收测试通知成功后创建或覆盖订阅 | `200` |
+| `POST` | `/api/test-alert` | 使用当前页面的单条灾害规则发送模拟预警，不保存订阅 | `200` |
 | `GET` | `/api/bark-urls` | 返回网页端可选择的 Bark URL 白名单 | `200` |
 | `GET` | `/api/subscription-options` | 返回灾害类别、来源目录和默认阈值 | `200` |
 | `DELETE` | `/api/unsubscribe` | 按 Bark 服务与 Key 删除订阅 | `200` |
@@ -298,3 +300,4 @@ vim .env
 - 数据源：[wolfx.jp](https://ws-api.wolfx.jp)
 - 数据源：[FAN Studio](https://api.fanstudio.tech/doc/ws-api/#home)
 - 推送服务：[Bark](https://github.com/Finb/Bark)
+- 国界数据：[OpenStreetMap contributors](https://www.openstreetmap.org/copyright)，通过 `country-boundaries` 离线数据集提供

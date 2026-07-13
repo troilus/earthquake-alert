@@ -2,9 +2,11 @@ use crate::config::normalize_bark_url;
 use crate::db::{Database, StoreErrorKind, SubscriptionStore};
 use crate::models::{
     ApiResponse, MonitoringTarget, NotificationDestination, SubscribeRequest, Subscription,
-    UnsubscribeRequest, mask_device_key,
+    TestAlertRequest, UnsubscribeRequest, mask_device_key,
 };
-use crate::services::{BarkNotifier, ReverseGeocodeResult, ReverseGeocoder, RuntimeStatus};
+use crate::services::{
+    BarkNotifier, LocationSearchResult, ReverseGeocodeResult, ReverseGeocoder, RuntimeStatus,
+};
 use crate::source_registry::{CategoryOption, category_options};
 use crate::utils::distance;
 use axum::{
@@ -31,6 +33,46 @@ pub struct AppState {
 pub struct ReverseGeocodeQuery {
     latitude: f64,
     longitude: f64,
+}
+
+#[derive(Deserialize)]
+pub struct LocationSearchQuery {
+    query: String,
+}
+
+pub async fn location_search_handler(
+    State(state): State<AppState>,
+    Query(query): Query<LocationSearchQuery>,
+) -> impl IntoResponse {
+    let value = query.query.trim();
+    if value.chars().count() < 2 || value.chars().count() > 100 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::<Vec<LocationSearchResult>>::error(
+                "请输入 2 到 100 个字符的地址",
+            )),
+        );
+    }
+    match state.reverse_geocoder.search(value).await {
+        Ok(locations) => (
+            StatusCode::OK,
+            Json(ApiResponse::success("地点搜索完成", Some(locations))),
+        ),
+        Err(error) => {
+            tracing::warn!(
+                event = "location_search.failed",
+                query = value,
+                error = ?error,
+                "location_search.failed"
+            );
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ApiResponse::<Vec<LocationSearchResult>>::error(
+                    "地点搜索暂时不可用，请稍后重试",
+                )),
+            )
+        }
+    }
 }
 
 pub async fn reverse_geocode_handler(
@@ -192,6 +234,86 @@ pub async fn subscribe_handler(
                     "订阅失败: {}",
                     e
                 ))),
+            )
+        }
+    }
+}
+
+pub async fn test_alert_handler(
+    State(state): State<AppState>,
+    payload: Result<Json<TestAlertRequest>, JsonRejection>,
+) -> impl IntoResponse {
+    let Json(payload) = match payload {
+        Ok(payload) => payload,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse::<()>::error("测试预警请求体无效")),
+            );
+        }
+    };
+    let device_key = match validate_device_key(payload.destination.bark_device_key()) {
+        Ok(value) => value,
+        Err((status, message)) => return (status, Json(ApiResponse::<()>::error(message))),
+    };
+    let bark_url = match normalize_bark_url(payload.destination.bark_base_url()) {
+        Ok(value) if state.bark_notifier.allows_bark_url(&value) => value,
+        Ok(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse::<()>::error("Bark URL 不在允许列表中")),
+            );
+        }
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse::<()>::error("Bark URL 无效")),
+            );
+        }
+    };
+    let targets = match normalize_targets(payload.targets) {
+        Ok(targets) => targets,
+        Err(message) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse::<()>::error(message)),
+            );
+        }
+    };
+    let category = payload.alert.category();
+    let subscription = Subscription::new(
+        NotificationDestination::Bark {
+            base_url: bark_url,
+            device_key,
+        },
+        targets,
+        vec![payload.alert],
+    );
+    if let Err(message) = subscription.validate() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::<()>::error(message)),
+        );
+    }
+
+    match state.bark_notifier.send_rule_test(&subscription).await {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(ApiResponse::<()>::success("测试预警已发送", None)),
+        ),
+        Err(error) => {
+            tracing::error!(
+                event = "alert_rule.test_failed",
+                category = category.as_str(),
+                device_key = %mask_device_key(subscription.device_key()),
+                error = ?error,
+                "alert_rule.test_failed"
+            );
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(ApiResponse::<()>::error(
+                    "测试预警发送失败，请检查 Bark 配置",
+                )),
             )
         }
     }

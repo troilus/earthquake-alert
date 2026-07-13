@@ -1,11 +1,12 @@
 use crate::config::Config;
 use crate::db::{Database, SubscriptionCandidateQuery, SubscriptionSnapshot};
 use crate::models::{
-    AlertRule, DestinationId, DisasterCategory, DisasterEvent, MonitoringTarget, ProviderChannel,
+    AlertRule, DestinationId, DisasterCategory, DisasterEvent, EarthquakeReportScope,
+    MonitoringTarget, ProviderChannel,
 };
 use crate::services::event_aggregator::{DeliveryAttempt, parse_event_epoch};
 use crate::services::{AlertRecipient, AlertTiming, BarkNotifier, EventAggregator, RuntimeStatus};
-use crate::utils::{distance, intensity, region};
+use crate::utils::{country, distance, intensity, region};
 use anyhow::Result;
 use futures_util::{StreamExt, stream};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -712,8 +713,27 @@ fn match_subscription(
             .interruption_level_for_intensity(timing.as_ref()?.estimated_intensity.round() as u8)?
             .as_str()
             .to_string(),
-        AlertRule::EarthquakeReport { min_magnitude, .. } => {
+        AlertRule::EarthquakeReport {
+            min_magnitude,
+            scope,
+            max_distance_km,
+            ..
+        } => {
             if event.magnitude.unwrap_or_default() < *min_magnitude {
+                return None;
+            }
+            let in_china = match (event.latitude, event.longitude) {
+                (Some(latitude), Some(longitude)) => country::is_in_china(latitude, longitude),
+                _ => false,
+            };
+            let nearby = distance_km <= *max_distance_km;
+            let in_scope = match scope {
+                EarthquakeReportScope::All => true,
+                EarthquakeReportScope::China => in_china,
+                EarthquakeReportScope::Nearby => nearby,
+                EarthquakeReportScope::ChinaOrNearby => in_china || nearby,
+            };
+            if !in_scope {
                 return None;
             }
             bark_level(event.level).to_string()
@@ -857,8 +877,9 @@ fn event_channel(event: &DisasterEvent) -> ProviderChannel {
 mod tests {
     use super::*;
     use crate::models::{
-        AdministrativeRegion, AlertRule, GeoPoint, IntensityBand, InterruptionLevel,
-        MonitoringTarget, NotificationDestination, SourceSelection, Subscription,
+        AdministrativeRegion, AlertRule, EarthquakeReportScope, GeoPoint, IntensityBand,
+        InterruptionLevel, MonitoringTarget, NotificationDestination, SourceSelection,
+        Subscription,
     };
 
     fn event(category: DisasterCategory, report_num: u32) -> DisasterEvent {
@@ -931,6 +952,66 @@ mod tests {
             p_wave_km_s: 6.0,
             s_wave_km_s: 3.5,
         }
+    }
+
+    fn subscription_with_report_scope(
+        scope: EarthquakeReportScope,
+        max_distance_km: f64,
+    ) -> SubscriptionSnapshot {
+        let snapshot = subscription();
+        let mut value = (*snapshot.subscription).clone();
+        value
+            .alerts
+            .retain(|alert| alert.category() != DisasterCategory::EarthquakeReport);
+        value.alerts.push(AlertRule::EarthquakeReport {
+            sources: SourceSelection::All,
+            min_magnitude: 4.5,
+            scope,
+            max_distance_km,
+        });
+        SubscriptionSnapshot::new(Arc::new(value))
+    }
+
+    #[test]
+    fn earthquake_report_scope_matches_china_or_nearby() {
+        let mut china_event = event(DisasterCategory::EarthquakeReport, 1);
+        china_event.latitude = Some(39.9042);
+        china_event.longitude = Some(116.4074);
+        assert!(
+            match_subscription(
+                subscription_with_report_scope(EarthquakeReportScope::ChinaOrNearby, 100.0),
+                &china_event,
+                &HashMap::new(),
+                policy(),
+            )
+            .is_some()
+        );
+
+        let mut nearby_foreign_event = event(DisasterCategory::EarthquakeReport, 1);
+        nearby_foreign_event.latitude = Some(35.0);
+        nearby_foreign_event.longitude = Some(105.0);
+        assert!(
+            match_subscription(
+                subscription_with_report_scope(EarthquakeReportScope::Nearby, 100.0),
+                &nearby_foreign_event,
+                &HashMap::new(),
+                policy(),
+            )
+            .is_some()
+        );
+
+        let mut distant_foreign_event = event(DisasterCategory::EarthquakeReport, 1);
+        distant_foreign_event.latitude = Some(-22.75);
+        distant_foreign_event.longitude = Some(171.63);
+        assert!(
+            match_subscription(
+                subscription_with_report_scope(EarthquakeReportScope::ChinaOrNearby, 300.0),
+                &distant_foreign_event,
+                &HashMap::new(),
+                policy(),
+            )
+            .is_none()
+        );
     }
 
     #[test]

@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 anyhow = { version = "1.0.103", default-features = false, features = ["std"] }
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "query", "tokio"] }
+country-boundaries = "1.2.0"
 dotenvy = { version = "0.15.7", default-features = false }
 futures-util = { version = "0.3.32", default-features = false, features = ["sink", "std"] }
 reqwest = { version = "0.13.4", default-features = false, features = ["http2", "json", "rustls"] }

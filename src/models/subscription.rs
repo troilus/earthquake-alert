@@ -89,6 +89,10 @@ pub enum AlertRule {
     EarthquakeReport {
         sources: SourceSelection,
         min_magnitude: f64,
+        #[serde(default)]
+        scope: EarthquakeReportScope,
+        #[serde(default = "default_earthquake_report_distance_km")]
+        max_distance_km: f64,
     },
     WeatherWarning {
         sources: SourceSelection,
@@ -152,6 +156,8 @@ impl AlertRule {
             DisasterCategory::EarthquakeReport => Self::EarthquakeReport {
                 sources,
                 min_magnitude: 4.5,
+                scope: EarthquakeReportScope::ChinaOrNearby,
+                max_distance_km: default_earthquake_report_distance_km(),
             },
             DisasterCategory::WeatherWarning => Self::WeatherWarning {
                 sources,
@@ -168,6 +174,20 @@ impl AlertRule {
             },
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EarthquakeReportScope {
+    #[default]
+    All,
+    China,
+    Nearby,
+    ChinaOrNearby,
+}
+
+const fn default_earthquake_report_distance_km() -> f64 {
+    300.0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -343,12 +363,18 @@ fn validate_alert(alert: &AlertRule) -> Result<(), String> {
             estimated_intensity_bands,
             ..
         } => validate_intensity_bands(estimated_intensity_bands),
-        AlertRule::EarthquakeReport { min_magnitude, .. } => {
-            if min_magnitude.is_finite() && (0.0..=10.0).contains(min_magnitude) {
-                Ok(())
-            } else {
-                Err("地震信息最低震级必须在 0 到 10 之间".to_string())
+        AlertRule::EarthquakeReport {
+            min_magnitude,
+            max_distance_km,
+            ..
+        } => {
+            if !min_magnitude.is_finite() || !(0.0..=10.0).contains(min_magnitude) {
+                return Err("地震信息最低震级必须在 0 到 10 之间".to_string());
             }
+            if !max_distance_km.is_finite() || !(1.0..=5_000.0).contains(max_distance_km) {
+                return Err("地震信息附近距离必须在 1 到 5000 公里之间".to_string());
+            }
+            Ok(())
         }
         AlertRule::WeatherWarning {
             min_severity,
@@ -446,6 +472,14 @@ pub struct SubscribeRequest {
     pub destination: NotificationDestination,
     pub targets: Vec<MonitoringTarget>,
     pub alerts: Vec<AlertRule>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TestAlertRequest {
+    pub destination: NotificationDestination,
+    pub targets: Vec<MonitoringTarget>,
+    pub alert: AlertRule,
 }
 
 #[derive(Debug, Deserialize)]

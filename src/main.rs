@@ -19,9 +19,9 @@ use config::{Config, load_dotenv};
 use db::Database;
 use providers::{FanStudioSource, WolfxSource};
 use routes::{
-    AppState, bark_urls_handler, health_handler, index_handler, reverse_geocode_handler,
-    stats_handler, status_handler, subscribe_handler, subscription_options_handler,
-    unsubscribe_handler,
+    AppState, bark_urls_handler, health_handler, index_handler, location_search_handler,
+    reverse_geocode_handler, stats_handler, status_handler, subscribe_handler,
+    subscription_options_handler, test_alert_handler, tutorial_image_handler, unsubscribe_handler,
 };
 use services::{
     BarkNotifier, BarkPushConfig, DisasterDispatcher, EventAggregator, ReverseGeocoder,
@@ -81,6 +81,7 @@ async fn run() -> Result<()> {
         volume: config.bark_volume,
         group: config.bark_group.clone(),
         call: config.bark_call,
+        icon_url: config.bark_icon_url.clone(),
     };
     let bark_notifier = BarkNotifier::new(
         config.bark_url_allowlist.clone(),
@@ -105,12 +106,18 @@ async fn run() -> Result<()> {
     let app = Router::new()
         .route("/", get(index_handler))
         .route("/index.html", get(index_handler))
+        .route("/img/{filename}", get(tutorial_image_handler))
         .route("/health", get(health_handler))
         .route(
             "/api/subscribe",
             post(subscribe_handler).layer(DefaultBodyLimit::max(SUBSCRIPTION_BODY_LIMIT_BYTES)),
         )
+        .route(
+            "/api/test-alert",
+            post(test_alert_handler).layer(DefaultBodyLimit::max(SUBSCRIPTION_BODY_LIMIT_BYTES)),
+        )
         .route("/api/bark-urls", get(bark_urls_handler))
+        .route("/api/search-locations", get(location_search_handler))
         .route("/api/reverse-geocode", get(reverse_geocode_handler))
         .route(
             "/api/subscription-options",

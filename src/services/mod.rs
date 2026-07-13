@@ -7,5 +7,5 @@ mod runtime_status;
 pub use bark_notifier::{AlertRecipient, AlertTiming, BarkNotifier, BarkPushConfig};
 pub use disaster_dispatcher::DisasterDispatcher;
 pub use event_aggregator::EventAggregator;
-pub use reverse_geocoder::{ReverseGeocodeResult, ReverseGeocoder};
+pub use reverse_geocoder::{LocationSearchResult, ReverseGeocodeResult, ReverseGeocoder};
 pub use runtime_status::RuntimeStatus;

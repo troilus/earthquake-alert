@@ -1,5 +1,6 @@
 use crate::config::Config;
 use anyhow::{Context, Result, bail};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -14,6 +15,16 @@ const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ReverseGeocodeResult {
+    pub province: String,
+    pub city: String,
+    pub district: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LocationSearchResult {
+    pub display_name: String,
+    pub latitude: f64,
+    pub longitude: f64,
     pub province: String,
     pub city: String,
     pub district: String,
@@ -47,6 +58,15 @@ struct CoordinateKey {
 
 #[derive(Deserialize)]
 struct NominatimResponse {
+    #[serde(default)]
+    address: NominatimAddress,
+}
+
+#[derive(Deserialize)]
+struct NominatimSearchResponse {
+    display_name: String,
+    lat: String,
+    lon: String,
     #[serde(default)]
     address: NominatimAddress,
 }
@@ -136,7 +156,7 @@ impl ReverseGeocoder {
             .context("reverse geocoding request failed")?
             .error_for_status()
             .context("reverse geocoding service returned an error")?;
-        let response = limited_response_json(response).await?;
+        let response: NominatimResponse = limited_response_json(response).await?;
         let value = response.address.into_result();
 
         let mut state = self.state.lock().await;
@@ -156,9 +176,79 @@ impl ReverseGeocoder {
         }
         Ok(value)
     }
+
+    pub async fn search(&self, query: &str) -> Result<Vec<LocationSearchResult>> {
+        if !self.enabled {
+            bail!("geocoding is disabled");
+        }
+        let query = query.trim();
+        if query.chars().count() < 2 || query.chars().count() > 100 {
+            bail!("invalid location query");
+        }
+
+        loop {
+            let delay = {
+                let mut state = self.state.lock().await;
+                match state.last_request {
+                    Some(last_request) => {
+                        let elapsed = last_request.elapsed();
+                        if elapsed < MIN_REQUEST_INTERVAL {
+                            Some(MIN_REQUEST_INTERVAL - elapsed)
+                        } else {
+                            state.last_request = Some(Instant::now());
+                            None
+                        }
+                    }
+                    None => {
+                        state.last_request = Some(Instant::now());
+                        None
+                    }
+                }
+            };
+            let Some(delay) = delay else { break };
+            tokio::time::sleep(delay).await;
+        }
+
+        let mut url = self
+            .endpoint
+            .join("search")
+            .context("failed to build geocoding search URL")?;
+        url.query_pairs_mut()
+            .append_pair("format", "jsonv2")
+            .append_pair("addressdetails", "1")
+            .append_pair("accept-language", "zh-CN,zh,en")
+            .append_pair("limit", "5")
+            .append_pair("q", query);
+        let response = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .context("geocoding search request failed")?
+            .error_for_status()
+            .context("geocoding search service returned an error")?;
+        let response: Vec<NominatimSearchResponse> = limited_response_json(response).await?;
+        Ok(response
+            .into_iter()
+            .filter_map(|item| {
+                let latitude = item.lat.parse::<f64>().ok()?;
+                let longitude = item.lon.parse::<f64>().ok()?;
+                CoordinateKey::new(latitude, longitude).ok()?;
+                let region = item.address.into_result();
+                Some(LocationSearchResult {
+                    display_name: item.display_name,
+                    latitude,
+                    longitude,
+                    province: region.province,
+                    city: region.city,
+                    district: region.district,
+                })
+            })
+            .collect())
+    }
 }
 
-async fn limited_response_json(mut response: reqwest::Response) -> Result<NominatimResponse> {
+async fn limited_response_json<T: DeserializeOwned>(mut response: reqwest::Response) -> Result<T> {
     if response
         .content_length()
         .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
