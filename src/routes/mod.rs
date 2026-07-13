@@ -6,4 +6,4 @@ pub use subscribe::{
     status_handler, subscribe_handler, subscription_options_handler, test_alert_handler,
     unsubscribe_handler,
 };
-pub use web::index_handler;
+pub use web::{index_handler, tutorial_image_handler};

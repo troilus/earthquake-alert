@@ -21,7 +21,7 @@ use providers::{FanStudioSource, WolfxSource};
 use routes::{
     AppState, bark_urls_handler, health_handler, index_handler, reverse_geocode_handler,
     stats_handler, status_handler, subscribe_handler, subscription_options_handler,
-    test_alert_handler, unsubscribe_handler,
+    test_alert_handler, tutorial_image_handler, unsubscribe_handler,
 };
 use services::{
     BarkNotifier, BarkPushConfig, DisasterDispatcher, EventAggregator, ReverseGeocoder,
@@ -105,6 +105,7 @@ async fn run() -> Result<()> {
     let app = Router::new()
         .route("/", get(index_handler))
         .route("/index.html", get(index_handler))
+        .route("/img/{filename}", get(tutorial_image_handler))
         .route("/health", get(health_handler))
         .route(
             "/api/subscribe",
