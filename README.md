@@ -90,6 +90,7 @@ vim .env
 | `BARK_VOLUME` | `10` | Bark 推送音量 (0-10) |
 | `BARK_GROUP` | `灾害预警` | Bark 推送分组名 |
 | `BARK_CALL` | `true` | 是否触发 Bark 通话级别推送；默认重复播放通知铃声 |
+| `BARK_ICON_URL` | (空) | Bark 通知图标的公网 HTTPS 地址，例如 `https://your-domain.example/img/icon.png` |
 | `WOLFX_WEBSOCKET_URL` | `wss://ws-api.wolfx.jp/all_eew` | Wolfx 聚合地震预警 WebSocket 地址 |
 | `FANSTUDIO_WEBSOCKET_URL` | `wss://ws.fanstudio.tech/all` | FAN Studio 单一聚合 WebSocket 地址，必须使用 `/all` 端点 |
 | `RECONNECT_MIN_SECONDS` | `1` | 重连最小间隔秒数 |

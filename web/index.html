@@ -197,6 +197,14 @@
     }
     .map-shell { position: relative; }
     .map-shell #map { margin-bottom: 0; }
+    .location-search { position: relative; margin-bottom: 10px; }
+    .location-search-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+    .location-search-row button { width: auto; height: 48px; padding: 0 16px; }
+    .location-search-results { position: absolute; z-index: 700; top: calc(100% + 5px); left: 0; right: 0; display: grid; gap: 1px; padding: 5px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: 0 10px 28px rgba(16, 24, 40, .16); }
+    .location-search-results[hidden] { display: none; }
+    .location-search-result { width: 100%; height: auto; padding: 10px; border: 0; border-radius: 6px; color: var(--text); background: transparent; text-align: left; line-height: 1.45; }
+    .location-search-result:hover, .location-search-result:focus-visible { background: var(--soft); }
+    .location-search-empty { padding: 10px; color: var(--muted); font-size: 12px; }
     .map-mode {
       position: absolute;
       z-index: 500;
@@ -759,6 +767,13 @@
                 <h2>监测地点</h2>
                 <span id="location-count">0 / 3</span>
               </div>
+              <div class="location-search">
+                <div class="location-search-row">
+                  <input id="location-search-input" type="search" maxlength="100" autocomplete="off" placeholder="搜索地址，例如：成都市武侯区" aria-label="搜索监测地点" />
+                  <button id="location-search-button" type="button">搜索</button>
+                </div>
+                <div id="location-search-results" class="location-search-results" hidden></div>
+              </div>
               <div class="map-shell">
                 <div id="map"></div>
                 <div id="map-mode" class="map-mode">点击地图添加监测地点</div>
@@ -866,7 +881,7 @@
           <span class="tutorial-step-number">3</span>
           <div class="tutorial-step-copy">
             <h3>添加监测地点</h3>
-            <p>最简单的方式是把上一步复制的<strong>完整 Bark 链接</strong>直接粘贴到 Bark Key 输入框，页面会自动识别服务器并提取设备 Key，无需手动拆分。也可以只输入域名后面的设备 Key，再手动选择与 Bark 顶部显示一致的 <strong>Bark URL</strong>。然后点地图右侧的定位按钮，或直接点击地图调整位置。经纬度确认无误后点击<strong>完成添加</strong>。最多可以保存 3 个地点，地震发生时会选择距震中最近的地点计算烈度和倒计时。</p>
+            <p>最简单的方式是把上一步复制的<strong>完整 Bark 链接</strong>直接粘贴到 Bark Key 输入框，页面会自动识别服务器并提取设备 Key，无需手动拆分。也可以只输入域名后面的设备 Key，再手动选择与 Bark 顶部显示一致的 <strong>Bark URL</strong>。在监测地点搜索框输入城市、区县或详细地址，点击候选结果即可自动定位并填写坐标；也可以使用当前位置、点击地图或手动输入坐标。确认位置后点击<strong>完成添加</strong>。最多可以保存 3 个地点，地震发生时会选择距震中最近的地点计算烈度和倒计时。</p>
             <div class="tutorial-gallery tutorial-gallery-single" aria-label="网页填写 Bark 和监测地点截图">
               <figure><img src="/img/bark.2.1.png" alt="订阅页填写 Bark Key、选择 Bark URL 并添加监测地点" loading="lazy" decoding="async"><figcaption>只填 Key，选择同一服务器，定位后完成添加</figcaption></figure>
             </div>
@@ -933,6 +948,9 @@
     const locationPickerHeading = document.querySelector("#location-picker-heading");
     const locationDetails = document.querySelector("#location-details");
     const mapMode = document.querySelector("#map-mode");
+    const locationSearchInput = document.querySelector("#location-search-input");
+    const locationSearchButton = document.querySelector("#location-search-button");
+    const locationSearchResults = document.querySelector("#location-search-results");
     const startAddLocation = document.querySelector("#start-add-location");
     const finishLocation = document.querySelector("#finish-location");
     const discardLocationEdit = document.querySelector("#discard-location-edit");
@@ -965,6 +983,8 @@
     const targetCoordinateRevisions = new Map();
     const targetRegionRevisions = new Map();
     const geocodeJobs = new Map();
+    let locationSearchController = null;
+    let locationSearchResultsData = [];
     const expandedDisasterCategories = new Set();
     let barkUrls = [];
     let optionCategories = [];
@@ -1223,6 +1243,63 @@
 
     function setMapView(latitude, longitude, zoom = 12) {
       if (map && validCoordinate(latitude, longitude)) map.setView([latitude, longitude], zoom);
+    }
+
+    function hideLocationSearchResults() {
+      locationSearchResults.hidden = true;
+      locationSearchResults.innerHTML = "";
+      locationSearchResultsData = [];
+    }
+
+    async function searchLocations() {
+      const query = locationSearchInput.value.trim();
+      if (query.length < 2) return show("请至少输入 2 个字符的地址", "error");
+      locationSearchController?.abort();
+      locationSearchController = new AbortController();
+      locationSearchButton.disabled = true;
+      locationSearchButton.textContent = "搜索中...";
+      try {
+        const params = new URLSearchParams({ query });
+        const res = await fetch(`${api}/api/search-locations?${params}`, { signal: locationSearchController.signal });
+        const json = await parseApiResponse(res);
+        if (!res.ok || !json.success || !Array.isArray(json.data)) throw new Error(json.message || "地点搜索失败");
+        locationSearchResultsData = json.data.filter((item) => validCoordinate(Number(item.latitude), Number(item.longitude)));
+        locationSearchResults.innerHTML = locationSearchResultsData.length
+          ? locationSearchResultsData.map((item, index) => `<button type="button" class="location-search-result" data-search-result="${index}">${escapeHtml(item.display_name || `${item.latitude}, ${item.longitude}`)}</button>`).join("")
+          : '<div class="location-search-empty">没有找到匹配地点，请尝试输入更完整的地址</div>';
+        locationSearchResults.hidden = false;
+      } catch (error) {
+        if (error.name !== "AbortError") show(error.message || "地点搜索失败，请稍后重试", "error");
+      } finally {
+        locationSearchButton.disabled = false;
+        locationSearchButton.textContent = "搜索";
+      }
+    }
+
+    function selectLocationSearchResult(result) {
+      const latitude = Number(result.latitude);
+      const longitude = Number(result.longitude);
+      if (!validCoordinate(latitude, longitude)) return;
+      if (uiState.locationMode === "overview") {
+        if (subscriptionDraft.targets.length >= 3) return show("最多添加 3 个监测地点", "error");
+        startAddingLocation({ latitude, longitude });
+      } else {
+        updateActiveTargetCoordinates(latitude, longitude);
+      }
+      const target = activeTarget();
+      if (!target) return;
+      cancelReverseGeocode(target.id);
+      target.label = String(result.display_name || "").split(",")[0].trim().slice(0, 80);
+      target.region.province = String(result.province || "");
+      target.region.city = String(result.city || "");
+      target.region.district = String(result.district || "");
+      nextRevision(targetRegionRevisions, target.id);
+      setMapView(latitude, longitude, 13);
+      renderLocations();
+      renderLocationEditor();
+      persistDraft();
+      hideLocationSearchResults();
+      show("已定位到搜索地点，请确认后保存", "success");
     }
 
     function fitTargetMarkers() {
@@ -2141,6 +2218,21 @@
     startAddLocation.addEventListener("click", () => startAddingLocation());
     finishLocation.addEventListener("click", finishLocationEdit);
     discardLocationEdit.addEventListener("click", discardLocationChanges);
+    locationSearchButton.addEventListener("click", searchLocations);
+    locationSearchInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      searchLocations();
+    });
+    locationSearchResults.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-search-result]");
+      if (!button) return;
+      const result = locationSearchResultsData[Number(button.dataset.searchResult)];
+      if (result) selectLocationSearchResult(result);
+    });
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest(".location-search")) hideLocationSearchResults();
+    });
 
     function locateCurrentPosition() {
       if (!navigator.geolocation) return show("当前浏览器不支持定位", "error");

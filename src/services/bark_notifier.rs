@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Semaphore;
+use url::Url;
 
 const MAX_RESPONSE_BYTES: usize = 16 * 1024;
 const MAX_TITLE_CHARS: usize = 180;
@@ -23,6 +24,7 @@ pub struct BarkPushConfig {
     pub volume: u8,
     pub group: String,
     pub call: bool,
+    pub icon_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -152,12 +154,22 @@ impl BarkNotifier {
         if event.training {
             lines.push("[测试] 这是一条模拟灾害信息".to_string());
         }
-        if !recipient.location_name.trim().is_empty() {
-            lines.push(format!("监测点: {}", recipient.location_name.trim()));
-        }
-        lines.push(format!("位置: {location}"));
-        if let Some(magnitude) = event.magnitude {
-            lines.push(format!("震级: M{magnitude:.1}"));
+        if event.category == DisasterCategory::EarthquakeReport {
+            if let Some(magnitude) = event.magnitude {
+                lines.push(format!("震级: M{magnitude:.1}"));
+            }
+            match (event.latitude, event.longitude) {
+                (Some(_), Some(_)) => lines.push(format!("震中: {location}")),
+                _ => lines.push("震中: 位置未知".to_string()),
+            }
+            if let Some(depth_km) = event.depth_km {
+                lines.push(format!("深度: {depth_km:.0}km"));
+            }
+        } else {
+            lines.push(format!("位置: {location}"));
+            if let Some(magnitude) = event.magnitude {
+                lines.push(format!("震级: M{magnitude:.1}"));
+            }
         }
         if let Some(timing) = timing {
             lines.push(format!(
@@ -181,11 +193,16 @@ impl BarkNotifier {
                 .collect::<Vec<_>>();
             lines.push(format!("影响区域: {}", regions.join("、")));
         }
-        if !event.description.trim().is_empty() {
+        if event.category != DisasterCategory::EarthquakeReport
+            && !event.description.trim().is_empty()
+        {
             lines.push(truncate_chars(&event.description, MAX_BODY_CHARS));
         }
         if !event.occurred_at.trim().is_empty() {
             lines.push(format!("时间: {}", event.occurred_at));
+        }
+        if !recipient.location_name.trim().is_empty() {
+            lines.push(format!("监测点: {}", recipient.location_name.trim()));
         }
         lines.push(format!("来源: {} ({})", event.source, event.channel));
         lines.push(format!("副标题: {subtitle}"));
@@ -694,12 +711,22 @@ fn bark_payload(
             payload["sound"] = serde_json::json!(sound);
         }
     }
+    if let Some(icon_url) = &push_config.icon_url {
+        payload["icon"] = serde_json::json!(icon_url);
+    }
     payload
 }
 
 impl BarkPushConfig {
     pub fn validate(&self) -> Result<()> {
         anyhow::ensure!(self.volume <= 10, "BARK_VOLUME must be in 0..=10");
+        if let Some(icon_url) = &self.icon_url {
+            let parsed = Url::parse(icon_url).context("invalid BARK_ICON_URL")?;
+            anyhow::ensure!(
+                matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some(),
+                "BARK_ICON_URL must be an absolute HTTP(S) URL"
+            );
+        }
         Ok(())
     }
 }
@@ -826,6 +853,7 @@ mod tests {
             volume: 10,
             group: "灾害预警".to_string(),
             call: true,
+            icon_url: None,
         };
         let level = normalize_bark_level(message.level);
 
@@ -853,6 +881,7 @@ mod tests {
             volume: 10,
             group: "灾害预警".to_string(),
             call: true,
+            icon_url: Some("https://alerts.example.com/img/icon.png".to_string()),
         };
 
         let payload = bark_payload(&message, &config, normalize_bark_level(message.level));
@@ -861,5 +890,6 @@ mod tests {
         assert_eq!(payload["sound"], "alarm");
         assert_eq!(payload["volume"], 10);
         assert_eq!(payload["call"], "1");
+        assert_eq!(payload["icon"], "https://alerts.example.com/img/icon.png");
     }
 }

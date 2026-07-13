@@ -19,6 +19,7 @@ pub async fn tutorial_image_handler(Path(filename): Path<String>) -> Response {
         "bark.2.1.png" => Some(include_bytes!("../../web/img/bark.2.1.png")),
         "bark.2.2.png" => Some(include_bytes!("../../web/img/bark.2.2.png")),
         "bark.2.3.png" => Some(include_bytes!("../../web/img/bark.2.3.png")),
+        "icon.png" => Some(include_bytes!("../../web/img/icon.png")),
         _ => None,
     };
     match bytes {

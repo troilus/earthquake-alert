@@ -28,6 +28,7 @@ pub struct Config {
     pub bark_volume: u8,
     pub bark_group: String,
     pub bark_call: bool,
+    pub bark_icon_url: Option<String>,
     pub wolfx_websocket_url: String,
     pub fanstudio_websocket_url: String,
     pub reconnect_min_seconds: u64,
@@ -65,6 +66,10 @@ impl Config {
             bark_volume: env_parse("BARK_VOLUME", 10)?,
             bark_group: env_string("BARK_GROUP", "灾害预警"),
             bark_call: env_bool("BARK_CALL", true)?,
+            bark_icon_url: env::var("BARK_ICON_URL")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
             wolfx_websocket_url: env_string("WOLFX_WEBSOCKET_URL", "wss://ws-api.wolfx.jp/all_eew"),
             fanstudio_websocket_url: env_string(
                 "FANSTUDIO_WEBSOCKET_URL",
@@ -134,6 +139,9 @@ impl Config {
         }
         if self.bark_url_allowlist.is_empty() {
             bail!("BARK_URL_ALLOWLIST must contain at least one URL");
+        }
+        if let Some(icon_url) = &self.bark_icon_url {
+            validate_http_url("BARK_ICON_URL", icon_url)?;
         }
         validate_http_url("REVERSE_GEOCODING_URL", &self.reverse_geocoding_url)?;
         Ok(())

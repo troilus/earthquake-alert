@@ -4,7 +4,9 @@ use crate::models::{
     ApiResponse, MonitoringTarget, NotificationDestination, SubscribeRequest, Subscription,
     TestAlertRequest, UnsubscribeRequest, mask_device_key,
 };
-use crate::services::{BarkNotifier, ReverseGeocodeResult, ReverseGeocoder, RuntimeStatus};
+use crate::services::{
+    BarkNotifier, LocationSearchResult, ReverseGeocodeResult, ReverseGeocoder, RuntimeStatus,
+};
 use crate::source_registry::{CategoryOption, category_options};
 use crate::utils::distance;
 use axum::{
@@ -31,6 +33,46 @@ pub struct AppState {
 pub struct ReverseGeocodeQuery {
     latitude: f64,
     longitude: f64,
+}
+
+#[derive(Deserialize)]
+pub struct LocationSearchQuery {
+    query: String,
+}
+
+pub async fn location_search_handler(
+    State(state): State<AppState>,
+    Query(query): Query<LocationSearchQuery>,
+) -> impl IntoResponse {
+    let value = query.query.trim();
+    if value.chars().count() < 2 || value.chars().count() > 100 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::<Vec<LocationSearchResult>>::error(
+                "请输入 2 到 100 个字符的地址",
+            )),
+        );
+    }
+    match state.reverse_geocoder.search(value).await {
+        Ok(locations) => (
+            StatusCode::OK,
+            Json(ApiResponse::success("地点搜索完成", Some(locations))),
+        ),
+        Err(error) => {
+            tracing::warn!(
+                event = "location_search.failed",
+                query = value,
+                error = ?error,
+                "location_search.failed"
+            );
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(ApiResponse::<Vec<LocationSearchResult>>::error(
+                    "地点搜索暂时不可用，请稍后重试",
+                )),
+            )
+        }
+    }
 }
 
 pub async fn reverse_geocode_handler(
