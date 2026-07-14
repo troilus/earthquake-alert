@@ -59,8 +59,10 @@ jobs:
         with:
           usesh: true
           prepare: |
-            pkg install -y rust
+            pkg install -y rustup
+            rustup-init -y
           run: |
+            . $HOME/.cargo/env
             cargo build --release
 
       - name: Upload artifact (FreeBSD)
