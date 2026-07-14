@@ -72,10 +72,15 @@
       line-height: 1.08;
       letter-spacing: 0;
     }
+    .status-shell {
+      position: relative;
+      justify-self: end;
+    }
     .badge {
       display: inline-flex;
       align-items: center;
       gap: 7px;
+      height: 34px;
       min-height: 34px;
       padding: 0 12px;
       border: 1px solid var(--line);
@@ -85,14 +90,76 @@
       font-size: 13px;
       white-space: nowrap;
     }
+    .status-trigger { cursor: pointer; }
+    .status-trigger:focus-visible {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+    }
     .dot {
       width: 8px;
       height: 8px;
+      flex: 0 0 8px;
       border-radius: 50%;
       background: var(--muted);
       box-shadow: 0 0 0 4px color-mix(in srgb, var(--muted) 16%, transparent);
     }
     .dot.online { background: #17b26a; box-shadow: 0 0 0 4px rgba(23, 178, 106, .15); }
+    .dot.partial { background: #f79009; box-shadow: 0 0 0 4px rgba(247, 144, 9, .15); }
+    .dot.offline { background: #f04438; box-shadow: 0 0 0 4px rgba(240, 68, 56, .15); }
+    .status-popover {
+      position: absolute;
+      z-index: 1200;
+      top: calc(100% + 9px);
+      right: 0;
+      width: min(360px, calc(100vw - 28px));
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 14px 34px rgba(0, 0, 0, .16);
+      color: var(--text);
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(-4px);
+      transition: opacity .14s ease, transform .14s ease, visibility .14s;
+      pointer-events: none;
+    }
+    .status-shell.is-open .status-popover {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    .status-popover-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      padding-bottom: 11px;
+      border-bottom: 1px solid var(--line);
+    }
+    .status-popover-head strong { font-size: 14px; }
+    .status-popover-head span { color: var(--muted); font-size: 11px; white-space: nowrap; }
+    .status-source-list { display: grid; padding: 5px 0; border-bottom: 1px solid var(--line); }
+    .status-source {
+      display: grid;
+      grid-template-columns: 8px minmax(0, 1fr) auto;
+      align-items: center;
+      column-gap: 9px;
+      padding: 8px 0;
+    }
+    .status-source .dot { grid-row: 1 / span 2; box-shadow: none; }
+    .status-source-name { font-size: 13px; font-weight: 750; }
+    .status-source-state { color: var(--muted); font-size: 12px; }
+    .status-source-meta { grid-column: 2 / 4; margin-top: 2px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+    .status-metrics { display: grid; grid-template-columns: 1fr 1fr; padding: 5px 0; border-bottom: 1px solid var(--line); }
+    .status-metric { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 7px 8px 7px 0; }
+    .status-metric:nth-child(even) { padding-right: 0; padding-left: 8px; border-left: 1px solid var(--line); }
+    .status-metric span { color: var(--muted); font-size: 11px; }
+    .status-metric strong { font-size: 13px; }
+    .status-backlog { padding-top: 11px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .status-backlog strong { display: block; margin-bottom: 3px; color: var(--text); font-size: 12px; }
     .subhead {
       margin: 0;
       color: var(--muted);
@@ -574,7 +641,7 @@
       main { padding-top: 22px; }
       .topline { gap: 8px; }
       h1 { font-size: 28px; line-height: 1.12; }
-      .badge { min-height: 32px; padding: 0 10px; font-size: 12px; }
+      .badge { height: 32px; min-height: 32px; padding: 0 10px; font-size: 12px; }
       .identity-grid, .grid, .form-actions { grid-template-columns: 1fr; }
       .admin-grid { grid-template-columns: 1fr; }
       .identity-grid { padding-bottom: 16px; margin-bottom: 18px; }
@@ -682,6 +749,11 @@
       .location-actions button { flex: 1; min-height: 40px; }
       .location-actions .remove-location { width: 40px; min-width: 40px; height: 40px; flex: 0 0 40px; }
     }
+    @media (max-width: 440px) {
+      .topline { grid-template-columns: 1fr; }
+      .status-shell { justify-self: start; }
+      .status-popover { right: auto; left: 0; }
+    }
   </style>
 </head>
 <body>
@@ -689,7 +761,42 @@
     <header>
       <div class="topline">
         <h1>灾害预警订阅</h1>
-        <div class="badge"><span id="status-dot" class="dot"></span><span id="stats">状态未知</span></div>
+        <div id="status-shell" class="status-shell">
+          <button id="service-status" class="badge status-trigger" type="button" aria-expanded="false" aria-controls="status-details">
+            <span id="status-dot" class="dot"></span>
+            <span id="status-label" role="status" aria-live="polite">状态未知</span>
+          </button>
+          <div id="status-details" class="status-popover" role="tooltip">
+            <div class="status-popover-head">
+              <strong>服务运行状态</strong>
+              <span id="status-updated">等待更新</span>
+            </div>
+            <div class="status-source-list">
+              <div class="status-source">
+                <span id="status-wolfx-dot" class="dot"></span>
+                <span class="status-source-name">Wolfx</span>
+                <span id="status-wolfx-state" class="status-source-state">未知</span>
+                <span id="status-wolfx-meta" class="status-source-meta">尚未获取数据</span>
+              </div>
+              <div class="status-source">
+                <span id="status-fanstudio-dot" class="dot"></span>
+                <span class="status-source-name">FAN Studio</span>
+                <span id="status-fanstudio-state" class="status-source-state">未知</span>
+                <span id="status-fanstudio-meta" class="status-source-meta">尚未获取数据</span>
+              </div>
+            </div>
+            <div class="status-metrics">
+              <div class="status-metric"><span>订阅总数</span><strong id="status-subscriptions">--</strong></div>
+              <div class="status-metric"><span>后台待处理</span><strong id="status-pending">--</strong></div>
+              <div class="status-metric"><span>推送成功</span><strong id="status-delivered">--</strong></div>
+              <div class="status-metric"><span>推送失败</span><strong id="status-failed">--</strong></div>
+            </div>
+            <div class="status-backlog">
+              <strong>待处理明细</strong>
+              <span id="status-backlog">事件 -- · 匹配 -- · 投递 -- · 重试 -- · 订阅确认 --</span>
+            </div>
+          </div>
+        </div>
       </div>
       <p class="subhead">将所选地点的灾害预警推送到当前设备</p>
     </header>
@@ -830,8 +937,22 @@
     const submit = document.querySelector("#submit");
     const unsubscribe = document.querySelector("#unsubscribe");
     let locate = null;
-    const stats = document.querySelector("#stats");
+    const statusShell = document.querySelector("#status-shell");
+    const serviceStatus = document.querySelector("#service-status");
+    const statusLabel = document.querySelector("#status-label");
     const statusDot = document.querySelector("#status-dot");
+    const statusUpdated = document.querySelector("#status-updated");
+    const statusWolfxDot = document.querySelector("#status-wolfx-dot");
+    const statusWolfxState = document.querySelector("#status-wolfx-state");
+    const statusWolfxMeta = document.querySelector("#status-wolfx-meta");
+    const statusFanstudioDot = document.querySelector("#status-fanstudio-dot");
+    const statusFanstudioState = document.querySelector("#status-fanstudio-state");
+    const statusFanstudioMeta = document.querySelector("#status-fanstudio-meta");
+    const statusSubscriptions = document.querySelector("#status-subscriptions");
+    const statusPending = document.querySelector("#status-pending");
+    const statusDelivered = document.querySelector("#status-delivered");
+    const statusFailed = document.querySelector("#status-failed");
+    const statusBacklog = document.querySelector("#status-backlog");
     const disasterGroupsEl = document.querySelector("#disaster-groups");
     const resetAlertRules = document.querySelector("#reset-alert-rules");
     const notifyLevelOrder = ["passive", "active", "critical"];
@@ -853,6 +974,9 @@
     let optionCategories = [];
     let configurationReady = false;
     let subscriptionRequestInFlight = false;
+    let statusRefreshInFlight = false;
+    let lastStatusRefreshAt = 0;
+    let statusWasOpenOnPointerDown = false;
 
     function setSubscriptionRequestInFlight(inFlight) {
       subscriptionRequestInFlight = inFlight;
@@ -2267,8 +2391,12 @@
         lastSubmittedIdentity = currentDestinationIdentity();
         updateDraftStatus();
         flushDraft();
-        show("订阅已保存，Bark 确认通知已发送", "success");
-        refreshStats();
+        if (json.data?.saved === true) {
+          show("订阅已保存，Bark 确认通知已发送", "success");
+          refreshStatus();
+        } else {
+          show(json.message || "Bark 服务暂时不可用，订阅确认将在后台重试", "warning");
+        }
       } catch (error) {
         show(error.message || "网络请求失败", "error");
       } finally {
@@ -2298,7 +2426,7 @@
         lastSubmittedIdentity = "";
         updateDraftStatus();
         show("已删除服务端订阅；浏览器配置草稿已保留", "success");
-        refreshStats();
+        refreshStatus();
       } catch (error) {
         show(error.message || "网络请求失败", "error");
       } finally {
@@ -2306,22 +2434,158 @@
       }
     });
 
-    async function refreshStats() {
+    function setStatusDot(dot, state = "unknown") {
+      dot.classList.remove("online", "partial", "offline");
+      if (state !== "unknown") dot.classList.add(state);
+    }
+
+    function formatStatusCount(value) {
+      return new Intl.NumberFormat("zh-CN").format(Number.isInteger(value) && value >= 0 ? value : 0);
+    }
+
+    function statusCount(value) {
+      return Number.isInteger(value) && value >= 0 ? value : 0;
+    }
+
+    function formatStatusTime(epochMs) {
+      if (!Number.isFinite(epochMs) || epochMs <= 0) return "尚无消息";
+      return new Date(epochMs).toLocaleTimeString("zh-CN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+    }
+
+    function setStatusSource(dot, stateEl, metaEl, source) {
+      if (!source || typeof source !== "object") {
+        setStatusDot(dot);
+        stateEl.textContent = "未知";
+        metaEl.textContent = "尚未获取数据";
+        return { delivered: 0, failed: 0 };
+      }
+
+      const connected = source.connected === true;
+      setStatusDot(dot, connected ? "online" : "offline");
+      stateEl.textContent = connected ? "已连接" : "未连接";
+      const messages = statusCount(source.messages);
+      const reconnects = statusCount(source.reconnects);
+      const lastMessage = formatStatusTime(source.last_message_epoch_ms);
+      metaEl.textContent = `消息 ${formatStatusCount(messages)} 条 · 最近 ${lastMessage}${reconnects ? ` · 重连 ${formatStatusCount(reconnects)} 次` : ""}`;
+      return {
+        delivered: statusCount(source.notifications_succeeded),
+        failed: statusCount(source.notifications_failed),
+      };
+    }
+
+    function setServiceStatus(label, state = "unknown") {
+      statusLabel.textContent = label;
+      serviceStatus.setAttribute("aria-label", `${label}，查看详细服务状态`);
+      setStatusDot(statusDot, state);
+    }
+
+    function setStatusDetailsUnknown() {
+      statusUpdated.textContent = "暂时无法获取";
+      setStatusSource(statusWolfxDot, statusWolfxState, statusWolfxMeta, null);
+      setStatusSource(statusFanstudioDot, statusFanstudioState, statusFanstudioMeta, null);
+      statusSubscriptions.textContent = "--";
+      statusPending.textContent = "--";
+      statusDelivered.textContent = "--";
+      statusFailed.textContent = "--";
+      statusBacklog.textContent = "事件 -- · 匹配 -- · 投递 -- · 重试 -- · 订阅确认 --";
+    }
+
+    function openStatusDetails() {
+      statusShell.classList.add("is-open");
+      serviceStatus.setAttribute("aria-expanded", "true");
+      if (Date.now() - lastStatusRefreshAt > 15_000) refreshStatus();
+    }
+
+    function closeStatusDetails() {
+      statusShell.classList.remove("is-open");
+      serviceStatus.setAttribute("aria-expanded", "false");
+    }
+
+    async function refreshStatus() {
+      if (statusRefreshInFlight) return;
+      statusRefreshInFlight = true;
       try {
-        const res = await fetch(api + "/api/stats");
+        const res = await fetch(api + "/api/status");
         const json = await parseApiResponse(res);
-        const available = res.ok && json.success && json.data && Number.isInteger(json.data.total_subscriptions);
-        stats.textContent = available ? `${json.data.total_subscriptions} 个订阅` : "状态未知";
-        statusDot.classList.toggle("online", Boolean(available));
+        const data = res.ok && json.success ? json.data : null;
+        if (!data || !Number.isInteger(data.total_subscriptions)) {
+          setServiceStatus("状态未知");
+          setStatusDetailsUnknown();
+          return;
+        }
+
+        const connectedSources = [data.wolfx, data.fanstudio]
+          .filter((source) => source?.connected === true).length;
+        const sourceLabel = connectedSources === 2
+          ? "数据源正常"
+          : connectedSources === 1 ? "数据源 1/2" : "数据源离线";
+        const state = connectedSources === 2 ? "online" : connectedSources === 1 ? "partial" : "offline";
+        const pending = data.durable && typeof data.durable === "object"
+          ? Object.entries(data.durable)
+            .filter(([key, value]) => key.endsWith("_pending") && Number.isFinite(value))
+            .reduce((sum, [, value]) => sum + value, 0)
+          : 0;
+        setServiceStatus(
+          `${sourceLabel} · ${data.total_subscriptions} 个订阅`,
+          state,
+        );
+        const wolfxNotifications = setStatusSource(statusWolfxDot, statusWolfxState, statusWolfxMeta, data.wolfx);
+        const fanstudioNotifications = setStatusSource(statusFanstudioDot, statusFanstudioState, statusFanstudioMeta, data.fanstudio);
+        const durable = data.durable && typeof data.durable === "object" ? data.durable : {};
+        const readyQueues = data.ready_queues && typeof data.ready_queues === "object" ? data.ready_queues : {};
+        const readyQueueDepth = (name) => statusCount(readyQueues[name]?.depth);
+        statusUpdated.textContent = `更新于 ${formatStatusTime(Date.now())}`;
+        statusSubscriptions.textContent = formatStatusCount(data.total_subscriptions);
+        statusPending.textContent = formatStatusCount(pending);
+        statusDelivered.textContent = formatStatusCount(wolfxNotifications.delivered + fanstudioNotifications.delivered);
+        statusFailed.textContent = formatStatusCount(wolfxNotifications.failed + fanstudioNotifications.failed);
+        statusBacklog.textContent = `事件 ${formatStatusCount(durable.inbox_pending)} · 匹配 ${formatStatusCount(durable.match_jobs_pending)} · 投递 ${formatStatusCount(durable.delivery_batches_pending)} · 重试 ${formatStatusCount(durable.retries_pending)} · 订阅确认 ${formatStatusCount(durable.subscription_confirmations_pending)}；内存队列 事件 ${formatStatusCount(readyQueueDepth("inbox"))} · 匹配 ${formatStatusCount(readyQueueDepth("matching"))} · 投递 ${formatStatusCount(readyQueueDepth("delivery"))}`;
       } catch {
-        stats.textContent = "状态未知";
-        statusDot.classList.remove("online");
+        setServiceStatus("状态未知");
+        setStatusDetailsUnknown();
+      } finally {
+        lastStatusRefreshAt = Date.now();
+        statusRefreshInFlight = false;
       }
     }
 
+    serviceStatus.addEventListener("pointerdown", () => {
+      statusWasOpenOnPointerDown = statusShell.classList.contains("is-open");
+    });
+    serviceStatus.addEventListener("click", (event) => {
+      const shouldClose = event.detail === 0
+        ? statusShell.classList.contains("is-open")
+        : statusWasOpenOnPointerDown;
+      if (shouldClose) closeStatusDetails();
+      else openStatusDetails();
+    });
+    statusShell.addEventListener("mouseenter", openStatusDetails);
+    statusShell.addEventListener("mouseleave", () => {
+      if (!statusShell.contains(document.activeElement)) closeStatusDetails();
+    });
+    statusShell.addEventListener("focusin", openStatusDetails);
+    statusShell.addEventListener("focusout", () => {
+      window.setTimeout(() => {
+        if (!statusShell.contains(document.activeElement)) closeStatusDetails();
+      }, 0);
+    });
+    document.addEventListener("pointerdown", (event) => {
+      if (!statusShell.contains(event.target)) closeStatusDetails();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || !statusShell.classList.contains("is-open")) return;
+      closeStatusDetails();
+      serviceStatus.blur();
+    });
+
     const draft = restoreDraft();
     initializeConfiguration(draft);
-    refreshStats();
+    refreshStatus();
   </script>
 </body>
 </html>

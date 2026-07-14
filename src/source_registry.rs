@@ -2,39 +2,44 @@ use crate::models::{AlertRule, DisasterCategory, ProviderChannel};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy)]
-pub struct SourceDefinition {
-    pub id: &'static str,
-    pub provider_key: &'static str,
-    pub channel: ProviderChannel,
-    pub category: DisasterCategory,
-    pub group_id: &'static str,
-    pub group_label: &'static str,
-    pub label: &'static str,
+pub(crate) struct SourceDefinition {
+    pub(crate) id: &'static str,
+    pub(crate) provider_key: &'static str,
+    pub(crate) channel: ProviderChannel,
+    pub(crate) category: DisasterCategory,
+    pub(crate) group_id: &'static str,
+    pub(crate) group_label: &'static str,
+    pub(crate) label: &'static str,
+    pub(crate) default_utc_offset_seconds: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct SourceGroup {
-    pub id: &'static str,
-    pub label: &'static str,
-    pub sources: Vec<SourceOption>,
+pub(crate) struct SourceGroup {
+    pub(crate) id: &'static str,
+    pub(crate) label: &'static str,
+    pub(crate) sources: Vec<SourceOption>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct CategoryOption {
-    pub id: &'static str,
-    pub label: &'static str,
-    pub source_groups: Vec<SourceGroup>,
-    pub default_alert: AlertRule,
+pub(crate) struct CategoryOption {
+    pub(crate) id: &'static str,
+    pub(crate) label: &'static str,
+    pub(crate) source_groups: Vec<SourceGroup>,
+    pub(crate) default_alert: AlertRule,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
-pub struct SourceOption {
-    pub id: &'static str,
-    pub label: &'static str,
+pub(crate) struct SourceOption {
+    pub(crate) id: &'static str,
+    pub(crate) label: &'static str,
+}
+
+pub(crate) fn default_utc_offset_seconds(source: &str) -> Option<i64> {
+    find(source).and_then(|definition| definition.default_utc_offset_seconds)
 }
 
 macro_rules! source {
-    ($id:literal, $key:literal, $channel:ident, $category:ident, $group:literal, $group_label:literal, $label:literal) => {
+    ($id:literal, $key:literal, $channel:ident, $category:ident, $group:literal, $group_label:literal, $label:literal, $offset:expr) => {
         SourceDefinition {
             id: $id,
             provider_key: $key,
@@ -43,11 +48,12 @@ macro_rules! source {
             group_id: $group,
             group_label: $group_label,
             label: $label,
+            default_utc_offset_seconds: $offset,
         }
     };
 }
 
-pub const SOURCES: &[SourceDefinition] = &[
+pub(crate) const SOURCES: &[SourceDefinition] = &[
     source!(
         "wolfx.jma_eew",
         "jma_eew",
@@ -55,7 +61,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeWarning,
         "wolfx-earthquake-warning",
         "Wolfx 地震预警",
-        "Wolfx 日本气象厅"
+        "Wolfx 日本气象厅",
+        Some(9 * 3600)
     ),
     source!(
         "wolfx.sc_eew",
@@ -64,7 +71,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeWarning,
         "wolfx-earthquake-warning",
         "Wolfx 地震预警",
-        "Wolfx 四川地震局"
+        "Wolfx 四川地震局",
+        Some(8 * 3600)
     ),
     source!(
         "wolfx.cenc_eew",
@@ -73,7 +81,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeWarning,
         "wolfx-earthquake-warning",
         "Wolfx 地震预警",
-        "Wolfx 中国地震台网"
+        "Wolfx 中国地震台网",
+        Some(8 * 3600)
     ),
     source!(
         "wolfx.fj_eew",
@@ -82,7 +91,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeWarning,
         "wolfx-earthquake-warning",
         "Wolfx 地震预警",
-        "Wolfx 福建地震局"
+        "Wolfx 福建地震局",
+        Some(8 * 3600)
     ),
     source!(
         "wolfx.cq_eew",
@@ -91,7 +101,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeWarning,
         "wolfx-earthquake-warning",
         "Wolfx 地震预警",
-        "Wolfx 重庆地震局"
+        "Wolfx 重庆地震局",
+        Some(8 * 3600)
     ),
     source!(
         "fanstudio.cea",
@@ -100,7 +111,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeWarning,
         "fanstudio-earthquake-warning",
         "FAN Studio 地震预警",
-        "中国地震预警网"
+        "中国地震预警网",
+        Some(8 * 3600)
     ),
     source!(
         "fanstudio.cea-pr",
@@ -109,7 +121,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeWarning,
         "fanstudio-earthquake-warning",
         "FAN Studio 地震预警",
-        "中国地震预警网省级网"
+        "中国地震预警网省级网",
+        Some(8 * 3600)
     ),
     source!(
         "fanstudio.cwa-eew",
@@ -118,7 +131,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeWarning,
         "fanstudio-earthquake-warning",
         "FAN Studio 地震预警",
-        "台湾气象署预警"
+        "台湾气象署预警",
+        Some(8 * 3600)
     ),
     source!(
         "fanstudio.jma",
@@ -127,7 +141,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeWarning,
         "fanstudio-earthquake-warning",
         "FAN Studio 地震预警",
-        "日本气象厅预警"
+        "日本气象厅预警",
+        Some(9 * 3600)
     ),
     source!(
         "fanstudio.sa",
@@ -136,7 +151,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeWarning,
         "fanstudio-earthquake-warning",
         "FAN Studio 地震预警",
-        "ShakeAlert"
+        "ShakeAlert",
+        None
     ),
     source!(
         "fanstudio.kma-eew",
@@ -145,7 +161,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeWarning,
         "fanstudio-earthquake-warning",
         "FAN Studio 地震预警",
-        "韩国气象厅预警"
+        "韩国气象厅预警",
+        Some(9 * 3600)
     ),
     source!(
         "fanstudio.cenc",
@@ -154,7 +171,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeReport,
         "fanstudio-earthquake-report",
         "地震信息",
-        "中国地震台网测定"
+        "中国地震台网测定",
+        Some(8 * 3600)
     ),
     source!(
         "fanstudio.ningxia",
@@ -163,7 +181,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeReport,
         "fanstudio-earthquake-report",
         "地震信息",
-        "宁夏地震局"
+        "宁夏地震局",
+        Some(8 * 3600)
     ),
     source!(
         "fanstudio.guangxi",
@@ -172,7 +191,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeReport,
         "fanstudio-earthquake-report",
         "地震信息",
-        "广西地震局"
+        "广西地震局",
+        Some(8 * 3600)
     ),
     source!(
         "fanstudio.shanxi",
@@ -181,7 +201,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeReport,
         "fanstudio-earthquake-report",
         "地震信息",
-        "山西地震局"
+        "山西地震局",
+        Some(8 * 3600)
     ),
     source!(
         "fanstudio.beijing",
@@ -190,7 +211,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeReport,
         "fanstudio-earthquake-report",
         "地震信息",
-        "北京地震局"
+        "北京地震局",
+        Some(8 * 3600)
     ),
     source!(
         "fanstudio.yunnan",
@@ -199,7 +221,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeReport,
         "fanstudio-earthquake-report",
         "地震信息",
-        "云南地震局"
+        "云南地震局",
+        Some(8 * 3600)
     ),
     source!(
         "fanstudio.cwa",
@@ -208,7 +231,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeReport,
         "fanstudio-earthquake-report",
         "地震信息",
-        "台湾气象署报告"
+        "台湾气象署报告",
+        Some(8 * 3600)
     ),
     source!(
         "fanstudio.hko",
@@ -217,7 +241,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeReport,
         "fanstudio-earthquake-report",
         "地震信息",
-        "香港天文台"
+        "香港天文台",
+        Some(8 * 3600)
     ),
     source!(
         "fanstudio.usgs",
@@ -226,7 +251,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeReport,
         "fanstudio-earthquake-report",
         "地震信息",
-        "USGS"
+        "USGS",
+        None
     ),
     source!(
         "fanstudio.emsc",
@@ -235,7 +261,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeReport,
         "fanstudio-earthquake-report",
         "地震信息",
-        "EMSC"
+        "EMSC",
+        None
     ),
     source!(
         "fanstudio.bcsf",
@@ -244,7 +271,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeReport,
         "fanstudio-earthquake-report",
         "地震信息",
-        "BCSF"
+        "BCSF",
+        None
     ),
     source!(
         "fanstudio.gfz",
@@ -253,7 +281,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeReport,
         "fanstudio-earthquake-report",
         "地震信息",
-        "GFZ"
+        "GFZ",
+        None
     ),
     source!(
         "fanstudio.usp",
@@ -262,7 +291,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeReport,
         "fanstudio-earthquake-report",
         "地震信息",
-        "USP"
+        "USP",
+        None
     ),
     source!(
         "fanstudio.kma",
@@ -271,7 +301,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeReport,
         "fanstudio-earthquake-report",
         "地震信息",
-        "韩国气象厅报告"
+        "韩国气象厅报告",
+        Some(9 * 3600)
     ),
     source!(
         "fanstudio.fssn",
@@ -280,7 +311,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeReport,
         "fanstudio-earthquake-report",
         "地震信息",
-        "FSSN"
+        "FSSN",
+        None
     ),
     source!(
         "fanstudio.fssn-cmt",
@@ -289,7 +321,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         EarthquakeReport,
         "fanstudio-earthquake-report",
         "地震信息",
-        "FSSN CMT"
+        "FSSN CMT",
+        None
     ),
     source!(
         "fanstudio.weatheralarm",
@@ -298,7 +331,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         WeatherWarning,
         "fanstudio-weather-warning",
         "气象预警",
-        "中国气象局气象预警"
+        "中国气象局气象预警",
+        Some(8 * 3600)
     ),
     source!(
         "fanstudio.tsunami",
@@ -307,7 +341,8 @@ pub const SOURCES: &[SourceDefinition] = &[
         Tsunami,
         "fanstudio-tsunami",
         "海啸",
-        "自然资源部海啸预警中心"
+        "自然资源部海啸预警中心",
+        Some(8 * 3600)
     ),
     source!(
         "fanstudio.typhoon",
@@ -316,15 +351,16 @@ pub const SOURCES: &[SourceDefinition] = &[
         Typhoon,
         "fanstudio-typhoon",
         "台风",
-        "中国气象局活跃台风"
+        "中国气象局活跃台风",
+        Some(8 * 3600)
     ),
 ];
 
-pub fn find(id: &str) -> Option<&'static SourceDefinition> {
+pub(crate) fn find(id: &str) -> Option<&'static SourceDefinition> {
     SOURCES.iter().find(|source| source.id == id)
 }
 
-pub fn find_provider(
+pub(crate) fn find_provider(
     channel: ProviderChannel,
     provider_key: &str,
 ) -> Option<&'static SourceDefinition> {
@@ -333,7 +369,7 @@ pub fn find_provider(
         .find(|source| source.channel == channel && source.provider_key == provider_key)
 }
 
-pub fn category_options() -> Vec<CategoryOption> {
+pub(crate) fn category_options() -> Vec<CategoryOption> {
     DisasterCategory::ALL
         .into_iter()
         .map(|category| {
@@ -391,6 +427,15 @@ mod tests {
                 group_metadata.entry(source.group_id).or_insert(metadata),
                 &metadata
             );
+            assert_eq!(
+                default_utc_offset_seconds(source.id),
+                source.default_utc_offset_seconds
+            );
+            assert!(
+                source
+                    .default_utc_offset_seconds
+                    .is_none_or(|offset| matches!(offset, 28_800 | 32_400))
+            );
         }
         assert_eq!(
             category_options()
@@ -399,6 +444,24 @@ mod tests {
                 .map(|group| group.sources.len())
                 .sum::<usize>(),
             SOURCES.len()
+        );
+    }
+
+    #[test]
+    fn source_time_contracts_are_declared_in_the_registry() {
+        assert_eq!(default_utc_offset_seconds("wolfx.jma_eew"), Some(32_400));
+        assert_eq!(
+            default_utc_offset_seconds("fanstudio.weatheralarm"),
+            Some(28_800)
+        );
+        assert_eq!(default_utc_offset_seconds("fanstudio.usgs"), None);
+        assert_eq!(
+            default_utc_offset_seconds("fanstudio.tsunami"),
+            Some(28_800)
+        );
+        assert_eq!(
+            default_utc_offset_seconds("fanstudio.typhoon"),
+            Some(28_800)
         );
     }
 }

@@ -1,11 +1,13 @@
+use super::reconnect;
 use super::wolfx_protocol::{self, CommonEarthquakeInfo};
 use crate::config::Config;
 use crate::models::{DisasterCategory, DisasterEvent, ProviderChannel};
-use crate::services::{DisasterDispatcher, RuntimeStatus};
+use crate::runtime::EventRuntime;
+use crate::runtime::RuntimeStatus;
 use crate::source_registry;
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::watch;
 use tokio_tungstenite::{
     connect_async_with_config,
@@ -15,8 +17,8 @@ use tokio_tungstenite::{
 const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone)]
-pub struct WolfxSource {
-    dispatcher: DisasterDispatcher,
+pub(crate) struct WolfxSource {
+    event_runtime: EventRuntime,
     websocket_url: String,
     reconnect_min: Duration,
     reconnect_max: Duration,
@@ -24,13 +26,13 @@ pub struct WolfxSource {
 }
 
 impl WolfxSource {
-    pub fn new(
+    pub(crate) fn new(
         config: &Config,
-        dispatcher: DisasterDispatcher,
+        event_runtime: EventRuntime,
         runtime_status: RuntimeStatus,
     ) -> Self {
         Self {
-            dispatcher,
+            event_runtime,
             websocket_url: config.wolfx_websocket_url.clone(),
             reconnect_min: Duration::from_secs(config.reconnect_min_seconds),
             reconnect_max: Duration::from_secs(config.reconnect_max_seconds),
@@ -38,7 +40,7 @@ impl WolfxSource {
         }
     }
 
-    pub async fn run(&self, mut shutdown: watch::Receiver<bool>) -> Result<()> {
+    pub(crate) async fn run(&self, mut shutdown: watch::Receiver<bool>) -> Result<()> {
         let mut delay = self.reconnect_min;
         loop {
             if *shutdown.borrow() {
@@ -46,7 +48,7 @@ impl WolfxSource {
             }
             match self.connect_once(&mut delay, &mut shutdown).await {
                 Ok(true) => break,
-                Ok(false) => delay = self.reconnect_min,
+                Ok(false) => {}
                 Err(error) => tracing::error!(
                     event = "wolfx.websocket_error",
                     error = ?error,
@@ -95,7 +97,7 @@ impl WolfxSource {
             result = connect => result
                 .map_err(|error| anyhow::anyhow!("Wolfx connection timed out: {error}"))??,
         };
-        *delay = self.reconnect_min;
+        let connected_at = Instant::now();
         self.runtime_status.wolfx().set_connected(true);
         tracing::info!(
             event = "wolfx.connected",
@@ -103,7 +105,8 @@ impl WolfxSource {
             "wolfx.connected"
         );
         let (mut write, mut read) = socket.split();
-        loop {
+        let outcome: Result<bool> = async {
+            loop {
             if *shutdown.borrow() {
                 return Ok(true);
             }
@@ -163,15 +166,12 @@ impl WolfxSource {
                     }
                     match wolfx_protocol::parse(&text) {
                         Ok(earthquake) => {
-                            if !self
-                                .dispatcher
+                            let accepted = self
+                                .event_runtime
                                 .submit_nonblocking(normalize(earthquake))
-                                .await
-                            {
-                                tracing::warn!(
-                                    event = "wolfx.ingress_backpressure",
-                                    "wolfx.ingress_backpressure"
-                                );
+                                .await;
+                            if !accepted {
+                                anyhow::bail!("Wolfx event was not durably committed");
                             }
                         }
                         Err(error) => {
@@ -187,8 +187,17 @@ impl WolfxSource {
                 Message::Close(_) => break,
                 _ => {}
             }
+            reconnect::reset_after_healthy_uptime(
+                delay,
+                self.reconnect_min,
+                connected_at.elapsed(),
+            );
         }
-        Ok(false)
+            Ok(false)
+        }
+        .await;
+        reconnect::reset_after_healthy_uptime(delay, self.reconnect_min, connected_at.elapsed());
+        outcome
     }
 }
 

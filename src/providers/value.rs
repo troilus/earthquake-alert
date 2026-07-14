@@ -1,4 +1,4 @@
-pub fn u32(data: &serde_json::Value, keys: &[&str]) -> u32 {
+pub(super) fn u32(data: &serde_json::Value, keys: &[&str]) -> u32 {
     keys.iter()
         .find_map(|key| {
             let value = data.get(*key)?;
@@ -10,18 +10,18 @@ pub fn u32(data: &serde_json::Value, keys: &[&str]) -> u32 {
         .unwrap_or(0)
 }
 
-pub fn f64(data: &serde_json::Value, keys: &[&str]) -> Option<f64> {
+pub(super) fn f64(data: &serde_json::Value, keys: &[&str]) -> Option<f64> {
     keys.iter().find_map(|key| data.get(*key).and_then(as_f64))
 }
 
-pub fn as_f64(value: &serde_json::Value) -> Option<f64> {
+pub(super) fn as_f64(value: &serde_json::Value) -> Option<f64> {
     value
         .as_f64()
         .or_else(|| value.as_str().and_then(|text| text.trim().parse().ok()))
         .filter(|number| number.is_finite())
 }
 
-pub fn bool(data: &serde_json::Value, keys: &[&str]) -> bool {
+pub(super) fn bool(data: &serde_json::Value, keys: &[&str]) -> bool {
     keys.iter()
         .find_map(|key| {
             let value = data.get(*key)?;

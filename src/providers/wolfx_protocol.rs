@@ -2,189 +2,189 @@ use serde::{Deserialize, Serialize};
 
 /// JMA earthquake warning payload. Time fields use UTC+9.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JmaEew {
+struct JmaEew {
     #[serde(rename = "type")]
-    pub alert_type: String,
+    alert_type: String,
     #[serde(rename = "EventID")]
-    pub event_id: String,
+    event_id: String,
     #[serde(rename = "ReportNum", alias = "Serial", default)]
-    pub report_num: u32,
+    report_num: u32,
     #[serde(rename = "AnnouncedTime")]
-    pub announced_time: String,
+    announced_time: String,
     #[serde(rename = "OriginTime")]
-    pub origin_time: String,
+    origin_time: String,
     #[serde(rename = "Hypocenter")]
-    pub hypocenter: String,
+    hypocenter: String,
     #[serde(rename = "Latitude")]
-    pub latitude: f64,
+    latitude: f64,
     #[serde(rename = "Longitude")]
-    pub longitude: f64,
+    longitude: f64,
     // 上游字段拼写为 Magunitude，反序列化时必须保留这个拼写
     #[serde(rename = "Magunitude")]
-    pub magnitude: f64,
+    magnitude: f64,
     #[serde(rename = "Depth")]
-    pub depth: f64,
+    depth: f64,
     #[serde(rename = "MaxIntensity")]
-    pub max_intensity: String,
+    max_intensity: String,
     #[serde(rename = "isFinal", default)]
-    pub is_final: bool,
+    is_final: bool,
     #[serde(rename = "Cancel", alias = "isCancel", default)]
-    pub cancel: bool,
+    cancel: bool,
     #[serde(
         rename = "isTraining",
         alias = "is_training",
         alias = "Training",
         default
     )]
-    pub training: bool,
+    training: bool,
 }
 
 /// 四川地震局预警数据，时间字段为 UTC+8
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SichuanEew {
+struct SichuanEew {
     #[serde(rename = "type")]
-    pub alert_type: String,
+    alert_type: String,
     #[serde(rename = "EventID")]
-    pub event_id: String,
+    event_id: String,
     #[serde(rename = "ReportNum", alias = "Serial", default)]
-    pub report_num: u32,
+    report_num: u32,
     #[serde(rename = "OriginTime")]
-    pub origin_time: String,
+    origin_time: String,
     #[serde(rename = "HypoCenter")]
-    pub hypocenter: String,
+    hypocenter: String,
     #[serde(rename = "Latitude")]
-    pub latitude: f64,
+    latitude: f64,
     #[serde(rename = "Longitude")]
-    pub longitude: f64,
+    longitude: f64,
     // 上游字段拼写为 Magunitude，反序列化时必须保留这个拼写
     #[serde(rename = "Magunitude")]
-    pub magnitude: f64,
+    magnitude: f64,
     #[serde(rename = "Depth", default)]
-    pub depth: Option<f64>,
+    depth: Option<f64>,
     #[serde(rename = "MaxIntensity")]
-    pub max_intensity: f64,
+    max_intensity: f64,
     #[serde(rename = "isFinal", default)]
-    pub is_final: bool,
+    is_final: bool,
     #[serde(rename = "Cancel", alias = "isCancel", default)]
-    pub cancel: bool,
+    cancel: bool,
     #[serde(
         rename = "isTraining",
         alias = "is_training",
         alias = "Training",
         default
     )]
-    pub training: bool,
+    training: bool,
 }
 
 /// 中国地震台网中心预警数据，时间字段为 UTC+8
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CencEew {
+struct CencEew {
     #[serde(rename = "type")]
-    pub alert_type: String,
+    alert_type: String,
     #[serde(rename = "EventID")]
-    pub event_id: String,
+    event_id: String,
     #[serde(rename = "ReportNum", alias = "Serial", default)]
-    pub report_num: u32,
+    report_num: u32,
     #[serde(rename = "OriginTime")]
-    pub origin_time: String,
+    origin_time: String,
     #[serde(rename = "HypoCenter")]
-    pub hypocenter: String,
+    hypocenter: String,
     #[serde(rename = "Latitude")]
-    pub latitude: f64,
+    latitude: f64,
     #[serde(rename = "Longitude")]
-    pub longitude: f64,
+    longitude: f64,
     #[serde(rename = "Magnitude")]
-    pub magnitude: f64,
+    magnitude: f64,
     #[serde(rename = "Depth", default)]
-    pub depth: Option<f64>,
+    depth: Option<f64>,
     #[serde(rename = "MaxIntensity")]
-    pub max_intensity: f64,
+    max_intensity: f64,
     #[serde(rename = "isFinal", default)]
-    pub is_final: bool,
+    is_final: bool,
     #[serde(rename = "Cancel", alias = "isCancel", default)]
-    pub cancel: bool,
+    cancel: bool,
     #[serde(
         rename = "isTraining",
         alias = "is_training",
         alias = "Training",
         default
     )]
-    pub training: bool,
+    training: bool,
 }
 
 /// 福建地震局预警数据，时间字段为 UTC+8
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FujianEew {
+struct FujianEew {
     #[serde(rename = "type")]
-    pub alert_type: String,
+    alert_type: String,
     #[serde(rename = "EventID")]
-    pub event_id: String,
+    event_id: String,
     #[serde(rename = "ReportNum", alias = "Serial", default)]
-    pub report_num: u32,
+    report_num: u32,
     #[serde(rename = "OriginTime")]
-    pub origin_time: String,
+    origin_time: String,
     #[serde(rename = "HypoCenter")]
-    pub hypocenter: String,
+    hypocenter: String,
     #[serde(rename = "Latitude")]
-    pub latitude: f64,
+    latitude: f64,
     #[serde(rename = "Longitude")]
-    pub longitude: f64,
+    longitude: f64,
     // 上游字段拼写为 Magunitude，反序列化时必须保留这个拼写
     #[serde(rename = "Magunitude")]
-    pub magnitude: f64,
+    magnitude: f64,
     #[serde(rename = "Depth", default)]
-    pub depth: Option<f64>,
+    depth: Option<f64>,
     #[serde(rename = "isFinal", default)]
-    pub is_final: bool,
+    is_final: bool,
     #[serde(rename = "Cancel", alias = "isCancel", default)]
-    pub cancel: bool,
+    cancel: bool,
     #[serde(
         rename = "isTraining",
         alias = "is_training",
         alias = "Training",
         default
     )]
-    pub training: bool,
+    training: bool,
 }
 
 /// 重庆市地震局预警数据，字段与 CENC 类似但震级字段为 Magnitude。
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChongqingEew {
+struct ChongqingEew {
     #[serde(rename = "type")]
-    pub alert_type: String,
+    alert_type: String,
     #[serde(rename = "EventID")]
-    pub event_id: String,
+    event_id: String,
     #[serde(rename = "ReportNum", alias = "Serial", default)]
-    pub report_num: u32,
+    report_num: u32,
     #[serde(rename = "OriginTime")]
-    pub origin_time: String,
+    origin_time: String,
     #[serde(rename = "HypoCenter")]
-    pub hypocenter: String,
+    hypocenter: String,
     #[serde(rename = "Latitude")]
-    pub latitude: f64,
+    latitude: f64,
     #[serde(rename = "Longitude")]
-    pub longitude: f64,
+    longitude: f64,
     #[serde(rename = "Magnitude")]
-    pub magnitude: f64,
+    magnitude: f64,
     #[serde(rename = "Depth", default)]
-    pub depth: Option<f64>,
+    depth: Option<f64>,
     #[serde(rename = "MaxIntensity", default)]
-    pub max_intensity: Option<f64>,
+    max_intensity: Option<f64>,
     #[serde(rename = "isFinal", default)]
-    pub is_final: bool,
+    is_final: bool,
     #[serde(rename = "Cancel", alias = "isCancel", default)]
-    pub cancel: bool,
+    cancel: bool,
     #[serde(
         rename = "isTraining",
         alias = "is_training",
         alias = "Training",
         default
     )]
-    pub training: bool,
+    training: bool,
 }
 
 #[derive(Debug, Clone)]
-pub enum EarthquakeData {
+enum EarthquakeData {
     Jma(JmaEew),
     Sichuan(SichuanEew),
     Cenc(CencEew),
@@ -193,7 +193,7 @@ pub enum EarthquakeData {
 }
 
 impl EarthquakeData {
-    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+    fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         let msg: WebSocketMessage = serde_json::from_str(json)?;
 
         match msg.message_type.as_str() {
@@ -224,7 +224,7 @@ impl EarthquakeData {
         }
     }
 
-    pub fn to_common_info(&self) -> CommonEarthquakeInfo {
+    fn to_common_info(&self) -> CommonEarthquakeInfo {
         match self {
             EarthquakeData::Jma(data) => CommonEarthquakeInfo {
                 event_id: data.event_id.clone(),
@@ -307,35 +307,35 @@ impl EarthquakeData {
         }
     }
 
-    pub fn parse_to_common_info(json: &str) -> Result<CommonEarthquakeInfo, serde_json::Error> {
+    fn parse_to_common_info(json: &str) -> Result<CommonEarthquakeInfo, serde_json::Error> {
         Ok(Self::from_json(json)?.to_common_info())
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct CommonEarthquakeInfo {
-    pub event_id: String,
-    pub report_num: u32,
-    pub latitude: f64,
-    pub longitude: f64,
-    pub magnitude: f64,
-    pub depth: Option<f64>,
-    pub max_intensity: String,
-    pub region: String,
-    pub origin_time: String,
-    pub source_type: String,
-    pub final_report: bool,
-    pub cancel: bool,
-    pub training: bool,
+pub(super) struct CommonEarthquakeInfo {
+    pub(super) event_id: String,
+    pub(super) report_num: u32,
+    pub(super) latitude: f64,
+    pub(super) longitude: f64,
+    pub(super) magnitude: f64,
+    pub(super) depth: Option<f64>,
+    pub(super) max_intensity: String,
+    pub(super) region: String,
+    pub(super) origin_time: String,
+    pub(super) source_type: String,
+    pub(super) final_report: bool,
+    pub(super) cancel: bool,
+    pub(super) training: bool,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct WebSocketMessage {
+struct WebSocketMessage {
     #[serde(rename = "type")]
-    pub message_type: String,
+    message_type: String,
 }
 
-pub fn parse(json: &str) -> Result<CommonEarthquakeInfo, serde_json::Error> {
+pub(super) fn parse(json: &str) -> Result<CommonEarthquakeInfo, serde_json::Error> {
     EarthquakeData::parse_to_common_info(json)
 }
 

@@ -4,7 +4,7 @@
 ///
 /// 衰减模型为 `I = a * M - b * log10(D + c) + d`，震级分段处会混合两组系数，
 /// 避免估算值在边界附近跳变过大
-pub fn estimate_intensity(magnitude: f64, distance_km: f64) -> f64 {
+pub(crate) fn estimate_intensity(magnitude: f64, distance_km: f64) -> f64 {
     if !magnitude.is_finite() || !distance_km.is_finite() || magnitude <= 0.0 || distance_km < 0.0 {
         return 0.0;
     }

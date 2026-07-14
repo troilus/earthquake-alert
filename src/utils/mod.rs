@@ -1,3 +1,3 @@
-pub mod distance;
-pub mod intensity;
-pub mod region;
+pub(crate) mod distance;
+pub(crate) mod intensity;
+pub(crate) mod region;

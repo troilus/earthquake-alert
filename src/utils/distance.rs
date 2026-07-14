@@ -2,7 +2,7 @@
 ///
 /// 坐标无效或接近对跖点导致迭代不收敛时返回 `None`
 #[inline]
-pub fn vincenty_distance(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> Option<f64> {
+pub(crate) fn vincenty_distance(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> Option<f64> {
     const A: f64 = 6378137.0;
     const B: f64 = 6356752.314245;
     const F: f64 = 1.0 / 298.257223563;
@@ -139,7 +139,7 @@ pub fn vincenty_distance(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> Option<f
     Some(s / 1000.0)
 }
 
-pub fn validate_coordinates(lat: f64, lon: f64) -> bool {
+pub(crate) fn validate_coordinates(lat: f64, lon: f64) -> bool {
     lat.is_finite()
         && lon.is_finite()
         && (-90.0..=90.0).contains(&lat)

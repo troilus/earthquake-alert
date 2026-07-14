@@ -1,11 +1,17 @@
 use crate::config::normalize_bark_url;
-use crate::db::{Database, StoreErrorKind, SubscriptionStore};
+use crate::delivery::{BarkNotifier, NotificationLinkService};
 use crate::models::{
     ApiResponse, MonitoringTarget, NotificationDestination, SubscribeRequest, Subscription,
     UnsubscribeRequest, mask_device_key,
 };
-use crate::services::{BarkNotifier, ReverseGeocodeResult, ReverseGeocoder, RuntimeStatus};
+use crate::routes::{ReverseGeocodeResult, ReverseGeocoder};
+use crate::runtime::{DurableBacklogSnapshot, RuntimeStatus, RuntimeStatusSnapshot};
 use crate::source_registry::{CategoryOption, category_options};
+use crate::storage::Storage;
+use crate::subscriptions::{
+    DeleteSubscriptionError, SubscriptionConfirmationOutcome, SubscriptionConfirmationService,
+    SubscriptionManager,
+};
 use crate::utils::distance;
 use axum::{
     Json,
@@ -14,26 +20,68 @@ use axum::{
     response::IntoResponse,
 };
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 const MAX_LOCATIONS: usize = 3;
 const MAX_LOCATION_NAME_CHARS: usize = 80;
 
 #[derive(Clone)]
-pub struct AppState {
-    pub db: Database,
-    pub bark_notifier: BarkNotifier,
-    pub bark_urls: Vec<String>,
-    pub runtime_status: RuntimeStatus,
-    pub reverse_geocoder: ReverseGeocoder,
+pub(crate) struct AppState {
+    pub(crate) storage: Storage,
+    subscriptions: SubscriptionManager,
+    bark_notifier: BarkNotifier,
+    bark_urls: Vec<String>,
+    runtime_status: RuntimeStatus,
+    reverse_geocoder: ReverseGeocoder,
+    pub(crate) notification_links: NotificationLinkService,
+    pub(crate) detail_concurrency: Arc<Semaphore>,
+    status_concurrency: Arc<Semaphore>,
+    pub(crate) storage_concurrency: Arc<Semaphore>,
+    subscription_concurrency: Arc<Semaphore>,
+    subscription_confirmations: SubscriptionConfirmationService,
+}
+
+impl AppState {
+    pub(crate) fn new(
+        storage: Storage,
+        bark_notifier: BarkNotifier,
+        runtime_status: RuntimeStatus,
+        reverse_geocoder: ReverseGeocoder,
+        notification_links: NotificationLinkService,
+        subscription_confirmations: SubscriptionConfirmationService,
+        max_concurrent_notifications: usize,
+    ) -> Self {
+        let subscriptions = storage.subscription_manager();
+        let bark_urls = bark_notifier.allowed_bark_urls();
+        Self {
+            storage,
+            subscriptions,
+            bark_notifier,
+            bark_urls,
+            runtime_status,
+            reverse_geocoder,
+            notification_links,
+            detail_concurrency: Arc::new(Semaphore::new(
+                max_concurrent_notifications
+                    .saturating_mul(4)
+                    .clamp(64, 4_096),
+            )),
+            status_concurrency: Arc::new(Semaphore::new(8)),
+            storage_concurrency: Arc::new(Semaphore::new(32)),
+            subscription_concurrency: Arc::new(Semaphore::new(16)),
+            subscription_confirmations,
+        }
+    }
 }
 
 #[derive(Deserialize)]
-pub struct ReverseGeocodeQuery {
+pub(crate) struct ReverseGeocodeQuery {
     latitude: f64,
     longitude: f64,
 }
 
-pub async fn reverse_geocode_handler(
+pub(crate) async fn reverse_geocode_handler(
     State(state): State<AppState>,
     Query(query): Query<ReverseGeocodeQuery>,
 ) -> impl IntoResponse {
@@ -70,7 +118,7 @@ pub async fn reverse_geocode_handler(
     }
 }
 
-pub async fn subscribe_handler(
+pub(crate) async fn subscribe_handler(
     State(state): State<AppState>,
     payload: Result<Json<SubscribeRequest>, JsonRejection>,
 ) -> impl IntoResponse {
@@ -142,67 +190,108 @@ pub async fn subscribe_handler(
         alert_count = subscription.alerts.len(),
         "subscription.requested"
     );
+    let masked_device_key = mask_device_key(subscription.device_key());
 
-    if let Err(error) = state
-        .bark_notifier
-        .send_subscription_confirm(&subscription)
-        .await
-    {
-        tracing::error!(
-            event = "subscription.confirm_failed",
-            device_key = %mask_device_key(subscription.device_key()),
-            error = ?error,
-            "subscription.confirm_failed"
-        );
+    let Ok(request_permit) = try_acquire_subscription_slot(&state.subscription_concurrency) else {
         return (
-            StatusCode::BAD_GATEWAY,
+            StatusCode::SERVICE_UNAVAILABLE,
             Json(ApiResponse::<SubscribeResponse>::error(
-                "Bark 接收测试失败，请检查 Bark Key；若确认无误，请稍后重试。订阅未保存",
+                "订阅请求繁忙，请稍后重试",
             )),
         );
-    }
+    };
+    let Ok(database_permit) = state.storage_concurrency.clone().try_acquire_owned() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ApiResponse::<SubscribeResponse>::error(
+                "订阅存储繁忙，请稍后重试",
+            )),
+        );
+    };
 
-    let store = state.db.subscriptions();
-    let subscription_to_store = subscription.clone();
-    match run_store(move || store.upsert_subscription(subscription_to_store)).await {
-        Ok(_) => {
+    let confirmation = match state.subscription_confirmations.begin(subscription).await {
+        Ok(confirmation) => confirmation,
+        Err(error) => {
+            tracing::error!(
+                event = "subscription.operation_store_failed",
+                device_key = %masked_device_key,
+                error = ?error,
+                "subscription.operation_store_failed"
+            );
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::<SubscribeResponse>::error(
+                    "订阅暂时无法保存，请稍后重试",
+                )),
+            );
+        }
+    };
+    drop(database_permit);
+    let outcome = state.subscription_confirmations.attempt(confirmation).await;
+    drop(request_permit);
+    match outcome {
+        Ok(SubscriptionConfirmationOutcome::Activated) => {
             tracing::info!(
                 event = "subscription.request_completed",
-                device_key = %mask_device_key(subscription.device_key()),
+                device_key = %masked_device_key,
                 "subscription.request_completed"
             );
             (
                 StatusCode::OK,
                 Json(ApiResponse::success(
                     "订阅已保存，确认通知已发送",
-                    Some(SubscribeResponse::from(subscription)),
+                    Some(SubscribeResponse { saved: true }),
                 )),
             )
         }
-        Err(e) => {
+        Ok(SubscriptionConfirmationOutcome::Pending) => (
+            StatusCode::ACCEPTED,
+            Json(ApiResponse::success(
+                "Bark 服务暂时不可用，订阅确认将在后台重试",
+                Some(SubscribeResponse { saved: false }),
+            )),
+        ),
+        Ok(SubscriptionConfirmationOutcome::Rejected) => (
+            StatusCode::BAD_GATEWAY,
+            Json(ApiResponse::<SubscribeResponse>::error(
+                "Bark 接收测试失败，请检查 Bark Key；订阅未激活",
+            )),
+        ),
+        Ok(SubscriptionConfirmationOutcome::Superseded) => (
+            StatusCode::CONFLICT,
+            Json(ApiResponse::<SubscribeResponse>::error(
+                "该 Bark 目标已有更新的订阅请求，请以最新请求为准",
+            )),
+        ),
+        Err(error) => {
             tracing::error!(
                 event = "subscription.request_failed",
-                device_key = %mask_device_key(subscription.device_key()),
-                error = ?e,
+                device_key = %masked_device_key,
+                error = ?error,
                 "subscription.request_failed"
             );
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse::<SubscribeResponse>::error(format!(
-                    "订阅失败: {}",
-                    e
-                ))),
+                Json(ApiResponse::<SubscribeResponse>::error(
+                    "订阅确认状态暂时无法更新，后台将自动恢复",
+                )),
             )
         }
     }
 }
 
-#[derive(Serialize)]
-pub struct SubscriptionOptionsResponse {
-    pub categories: Vec<CategoryOption>,
+fn try_acquire_subscription_slot(
+    concurrency: &Arc<Semaphore>,
+) -> Result<OwnedSemaphorePermit, tokio::sync::TryAcquireError> {
+    Arc::clone(concurrency).try_acquire_owned()
 }
 
-pub async fn subscription_options_handler() -> impl IntoResponse {
+#[derive(Serialize)]
+pub(crate) struct SubscriptionOptionsResponse {
+    pub(crate) categories: Vec<CategoryOption>,
+}
+
+pub(crate) async fn subscription_options_handler() -> impl IntoResponse {
     Json(ApiResponse::success(
         "订阅选项获取成功",
         Some(SubscriptionOptionsResponse {
@@ -211,7 +300,7 @@ pub async fn subscription_options_handler() -> impl IntoResponse {
     ))
 }
 
-pub async fn unsubscribe_handler(
+pub(crate) async fn unsubscribe_handler(
     State(state): State<AppState>,
     payload: Result<Json<UnsubscribeRequest>, JsonRejection>,
 ) -> impl IntoResponse {
@@ -256,9 +345,19 @@ pub async fn unsubscribe_handler(
         "subscription.delete_requested"
     );
 
-    let store = state.db.subscriptions();
+    let manager = state.subscriptions.clone();
     let destination_to_delete = destination_id.clone();
-    match run_store(move || store.delete_subscription(&destination_to_delete)).await {
+    let Ok(permit) = state.storage_concurrency.clone().try_acquire_owned() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ApiResponse::<()>::error("订阅存储繁忙，请稍后重试")),
+        );
+    };
+    match run_store(permit, move || {
+        manager.delete_subscription(&destination_to_delete)
+    })
+    .await
+    {
         Ok(_) => {
             tracing::info!(
                 event = "subscription.delete_completed",
@@ -277,27 +376,24 @@ pub async fn unsubscribe_handler(
                 error = ?e,
                 "subscription.delete_failed"
             );
-            let status = match SubscriptionStore::classify_error(&e) {
-                StoreErrorKind::NotFound => StatusCode::NOT_FOUND,
-                StoreErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+            let status = match e {
+                DeleteSubscriptionError::NotFound => StatusCode::NOT_FOUND,
+                DeleteSubscriptionError::Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
             };
             (
                 status,
-                Json(ApiResponse::<()>::error(format!("取消订阅失败: {}", e))),
+                Json(ApiResponse::<()>::error(match status {
+                    StatusCode::NOT_FOUND => "订阅不存在或已取消",
+                    _ => "取消订阅暂时无法完成，请稍后重试",
+                })),
             )
         }
     }
 }
 
 #[derive(Serialize)]
-pub struct SubscribeResponse {
-    pub saved: bool,
-}
-
-impl From<Subscription> for SubscribeResponse {
-    fn from(_sub: Subscription) -> Self {
-        Self { saved: true }
-    }
+pub(crate) struct SubscribeResponse {
+    pub(crate) saved: bool,
 }
 
 fn normalize_targets(mut targets: Vec<MonitoringTarget>) -> Result<Vec<MonitoringTarget>, String> {
@@ -351,26 +447,35 @@ fn validate_device_key(raw: &str) -> std::result::Result<String, (StatusCode, St
     Ok(trimmed.to_string())
 }
 
-async fn run_store<F>(operation: F) -> anyhow::Result<()>
+async fn run_store<P, F>(
+    permit: P,
+    operation: F,
+) -> std::result::Result<(), DeleteSubscriptionError>
 where
-    F: FnOnce() -> anyhow::Result<()> + Send + 'static,
+    P: Send + 'static,
+    F: FnOnce() -> std::result::Result<(), DeleteSubscriptionError> + Send + 'static,
 {
-    tokio::task::spawn_blocking(operation)
-        .await
-        .map_err(anyhow::Error::from)?
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        operation()
+    })
+    .await
+    .map_err(|error| DeleteSubscriptionError::Storage(anyhow::Error::from(error)))?
 }
 
 #[derive(Serialize)]
-pub struct StatsResponse {
-    pub total_subscriptions: usize,
+pub(crate) struct BarkUrlsResponse {
+    pub(crate) bark_urls: Vec<String>,
 }
 
 #[derive(Serialize)]
-pub struct BarkUrlsResponse {
-    pub bark_urls: Vec<String>,
+struct StatusResponse {
+    total_subscriptions: usize,
+    #[serde(flatten)]
+    runtime: RuntimeStatusSnapshot,
 }
 
-pub async fn bark_urls_handler(State(state): State<AppState>) -> impl IntoResponse {
+pub(crate) async fn bark_urls_handler(State(state): State<AppState>) -> impl IntoResponse {
     Json(ApiResponse::success(
         "Bark URL 列表获取成功",
         Some(BarkUrlsResponse {
@@ -379,47 +484,65 @@ pub async fn bark_urls_handler(State(state): State<AppState>) -> impl IntoRespon
     ))
 }
 
-pub async fn stats_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let store = state.db.subscriptions();
-    match tokio::task::spawn_blocking(move || store.get_total_count()).await {
-        Ok(Ok(count)) => (
-            StatusCode::OK,
-            Json(ApiResponse::success(
-                "统计成功",
-                Some(StatsResponse {
-                    total_subscriptions: count,
-                }),
-            )),
-        ),
-        Ok(Err(e)) => {
-            tracing::error!(event = "stats.load_failed", error = ?e, "stats.load_failed");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse::<StatsResponse>::error(format!(
-                    "获取统计失败: {}",
-                    e
-                ))),
-            )
-        }
-        Err(e) => {
-            tracing::error!(event = "stats.task_failed", error = ?e, "stats.task_failed");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ApiResponse::<StatsResponse>::error("获取统计失败")),
-            )
-        }
-    }
-}
-
-pub async fn health_handler() -> impl IntoResponse {
+pub(crate) async fn health_handler() -> impl IntoResponse {
     (StatusCode::OK, Json(ApiResponse::<()>::success("OK", None)))
 }
 
-pub async fn status_handler(State(state): State<AppState>) -> impl IntoResponse {
-    Json(ApiResponse::success(
-        "运行状态获取成功",
-        Some(state.runtime_status.snapshot()),
-    ))
+pub(crate) async fn status_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let Ok(permit) = state.status_concurrency.clone().try_acquire_owned() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ApiResponse::error("运行状态查询繁忙，请稍后重试")),
+        );
+    };
+    let Ok(database_permit) = state.storage_concurrency.clone().try_acquire_owned() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ApiResponse::error("运行状态查询繁忙，请稍后重试")),
+        );
+    };
+    let storage = state.storage.clone();
+    let subscriptions = state.subscriptions.clone();
+    let status = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let _database_permit = database_permit;
+        let backlog = storage.backlog_counts()?;
+        let durable = DurableBacklogSnapshot {
+            inbox_pending: backlog.inbox,
+            match_jobs_pending: backlog.match_jobs,
+            delivery_batches_pending: backlog.delivery_batches,
+            retries_pending: backlog.retries,
+            subscription_confirmations_pending: subscriptions.pending_confirmation_count()?,
+        };
+        Ok::<_, anyhow::Error>((subscriptions.total_count()?, durable))
+    })
+    .await;
+    match status {
+        Ok(Ok((total_subscriptions, durable))) => (
+            StatusCode::OK,
+            Json(ApiResponse::success(
+                "运行状态获取成功",
+                Some(StatusResponse {
+                    total_subscriptions,
+                    runtime: state.runtime_status.snapshot(durable),
+                }),
+            )),
+        ),
+        Ok(Err(error)) => {
+            tracing::error!(event = "status.load_failed", error = ?error, "status.load_failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error("运行状态暂时无法获取")),
+            )
+        }
+        Err(error) => {
+            tracing::error!(event = "status.task_failed", error = ?error, "status.task_failed");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error("运行状态暂时无法获取")),
+            )
+        }
+    }
 }
 
 #[cfg(test)]
@@ -458,5 +581,31 @@ mod tests {
         let mut payload = request();
         payload.targets[0].region.province = "省".repeat(MAX_LOCATION_NAME_CHARS + 1);
         assert!(normalize_targets(payload.targets).is_err());
+    }
+
+    #[test]
+    fn subscription_admission_rejects_before_external_work_when_saturated() {
+        let concurrency = Arc::new(Semaphore::new(1));
+        let held = try_acquire_subscription_slot(&concurrency);
+        assert!(held.is_ok());
+        assert!(try_acquire_subscription_slot(&concurrency).is_err());
+        drop(held);
+        assert!(try_acquire_subscription_slot(&concurrency).is_ok());
+    }
+
+    #[test]
+    fn status_response_flattens_subscription_count_and_runtime_metrics() {
+        let response = StatusResponse {
+            total_subscriptions: 12,
+            runtime: RuntimeStatus::default().snapshot(DurableBacklogSnapshot::default()),
+        };
+        let value = serde_json::to_value(response).expect("status response should serialize");
+
+        assert_eq!(value["total_subscriptions"], 12);
+        assert!(value.get("wolfx").is_some());
+        assert!(value.get("fanstudio").is_some());
+        assert!(value.get("durable").is_some());
+        assert!(value.get("ready_queues").is_some());
+        assert!(value.get("runtime").is_none());
     }
 }

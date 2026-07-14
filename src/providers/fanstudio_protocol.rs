@@ -3,19 +3,19 @@ use crate::source_registry;
 
 use super::value;
 
-pub struct FanStudioBatch {
-    pub source: String,
-    pub md5: Option<String>,
-    pub events: Vec<DisasterEvent>,
+pub(super) struct FanStudioBatch {
+    pub(super) source: String,
+    pub(super) md5: Option<String>,
+    pub(super) events: Vec<DisasterEvent>,
 }
 
 #[cfg(test)]
-pub fn parse_fanstudio_update(message: &str) -> anyhow::Result<Vec<DisasterEvent>> {
+fn parse_fanstudio_update(message: &str) -> anyhow::Result<Vec<DisasterEvent>> {
     let root: serde_json::Value = serde_json::from_str(message)?;
     parse_fanstudio_update_value(&root)
 }
 
-pub fn parse_fanstudio_update_value(
+pub(super) fn parse_fanstudio_update_value(
     root: &serde_json::Value,
 ) -> anyhow::Result<Vec<DisasterEvent>> {
     if root.get("type").and_then(serde_json::Value::as_str) != Some("update") {
@@ -38,7 +38,7 @@ pub fn parse_fanstudio_update_value(
     )
 }
 
-pub fn parse_fanstudio_snapshot(
+pub(super) fn parse_fanstudio_snapshot(
     root: &serde_json::Value,
 ) -> Vec<(String, anyhow::Result<FanStudioBatch>)> {
     root.as_object()
@@ -63,7 +63,7 @@ pub fn parse_fanstudio_snapshot(
         .collect()
 }
 
-pub fn parse_fanstudio_payload(
+fn parse_fanstudio_payload(
     source: &str,
     data: &serde_json::Value,
     md5: Option<&str>,
@@ -103,7 +103,7 @@ fn parse_fanstudio_source(
     }
 }
 
-pub fn fanstudio_source_category(source: &str) -> Option<DisasterCategory> {
+fn fanstudio_source_category(source: &str) -> Option<DisasterCategory> {
     source_registry::find_provider(ProviderChannel::FanStudio, source)
         .map(|definition| definition.category)
 }

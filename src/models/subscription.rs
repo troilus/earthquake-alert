@@ -45,7 +45,8 @@ impl NotificationDestination {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DestinationId {
     pub base_url: String,
     pub device_key: String,
@@ -177,15 +178,6 @@ pub enum SourceSelection {
     Include { ids: Vec<String> },
 }
 
-impl SourceSelection {
-    pub fn includes(&self, source: &str) -> bool {
-        match self {
-            Self::All => true,
-            Self::Include { ids } => ids.iter().any(|id| id == source),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IntensityBand {
@@ -246,11 +238,7 @@ impl Subscription {
             .find(|alert| alert.category() == category)
     }
 
-    pub fn source_enabled(&self, category: DisasterCategory, source: &str) -> bool {
-        self.alert(category)
-            .is_some_and(|alert| alert.sources().includes(source))
-    }
-
+    #[cfg(test)]
     pub fn interruption_level_for_intensity(
         &self,
         estimated_intensity: u8,
@@ -327,6 +315,9 @@ fn validate_target(target: &MonitoringTarget) -> Result<(), String> {
         ("城市", &target.region.city),
         ("区县", &target.region.district),
     ] {
+        if value.chars().any(char::is_control) {
+            return Err(format!("监测地点{label}不能包含控制字符"));
+        }
         if value.chars().count() > MAX_TARGET_FIELD_CHARS {
             return Err(format!(
                 "监测地点{label}最多 {MAX_TARGET_FIELD_CHARS} 个字符"
@@ -630,7 +621,7 @@ mod tests {
                 "type": "bark",
                 "base_url": "https://api.day.app",
                 "device_key": "abc123",
-                "legacy_option": true
+                "unknown_option": true
             },
             "targets": [],
             "alerts": []

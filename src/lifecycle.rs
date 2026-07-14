@@ -1,6 +1,7 @@
-use crate::db::Database;
 use crate::providers::{FanStudioSource, WolfxSource};
-use crate::services::DisasterDispatcher;
+use crate::runtime::EventRuntime;
+use crate::storage::Storage;
+use crate::subscriptions::SubscriptionConfirmationService;
 use anyhow::{Context, Result};
 use axum::Router;
 use std::time::Duration;
@@ -9,6 +10,32 @@ use tokio::task::{JoinError, JoinHandle};
 
 pub(crate) const FORCED_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 
+pub(crate) struct RuntimeServices {
+    storage: Storage,
+    event_runtime: EventRuntime,
+    subscription_confirmations: SubscriptionConfirmationService,
+    wolfx: WolfxSource,
+    fanstudio: FanStudioSource,
+}
+
+impl RuntimeServices {
+    pub(crate) fn new(
+        storage: Storage,
+        event_runtime: EventRuntime,
+        subscription_confirmations: SubscriptionConfirmationService,
+        wolfx: WolfxSource,
+        fanstudio: FanStudioSource,
+    ) -> Self {
+        Self {
+            storage,
+            event_runtime,
+            subscription_confirmations,
+            wolfx,
+            fanstudio,
+        }
+    }
+}
+
 // This coordinator owns every JoinHandle, so each task result is observed once.
 type TaskResult = Result<&'static str>;
 type JoinResult = std::result::Result<TaskResult, JoinError>;
@@ -16,7 +43,8 @@ type JoinResult = std::result::Result<TaskResult, JoinError>;
 #[derive(Clone, Copy)]
 enum TaskKind {
     HttpServer,
-    Dispatcher,
+    EventRuntime,
+    SubscriptionConfirmations,
     Wolfx,
     FanStudio,
 }
@@ -64,7 +92,8 @@ impl ManagedTask {
 
 struct ManagedTasks {
     server: ManagedTask,
-    dispatcher: ManagedTask,
+    event_runtime: ManagedTask,
+    subscription_confirmations: ManagedTask,
     wolfx: ManagedTask,
     fanstudio: ManagedTask,
 }
@@ -72,13 +101,15 @@ struct ManagedTasks {
 impl ManagedTasks {
     fn new(
         server: JoinHandle<TaskResult>,
-        dispatcher: JoinHandle<TaskResult>,
+        event_runtime: JoinHandle<TaskResult>,
+        subscription_confirmations: JoinHandle<TaskResult>,
         wolfx: JoinHandle<TaskResult>,
         fanstudio: JoinHandle<TaskResult>,
     ) -> Self {
         Self {
             server: ManagedTask::new(server),
-            dispatcher: ManagedTask::new(dispatcher),
+            event_runtime: ManagedTask::new(event_runtime),
+            subscription_confirmations: ManagedTask::new(subscription_confirmations),
             wolfx: ManagedTask::new(wolfx),
             fanstudio: ManagedTask::new(fanstudio),
         }
@@ -87,33 +118,46 @@ impl ManagedTasks {
     fn mark_completed(&mut self, task: TaskKind) {
         match task {
             TaskKind::HttpServer => self.server.mark_completed(),
-            TaskKind::Dispatcher => self.dispatcher.mark_completed(),
+            TaskKind::EventRuntime => self.event_runtime.mark_completed(),
+            TaskKind::SubscriptionConfirmations => self.subscription_confirmations.mark_completed(),
             TaskKind::Wolfx => self.wolfx.mark_completed(),
             TaskKind::FanStudio => self.fanstudio.mark_completed(),
         }
     }
 
-    fn providers_completed(&self) -> bool {
-        self.wolfx.completed && self.fanstudio.completed
-    }
-
     fn all_completed(&self) -> bool {
         self.server.completed
-            && self.dispatcher.completed
+            && self.event_runtime.completed
+            && self.subscription_confirmations.completed
+            && self.wolfx.completed
+            && self.fanstudio.completed
+    }
+
+    fn ingress_completed(&self) -> bool {
+        self.server.completed
+            && self.subscription_confirmations.completed
             && self.wolfx.completed
             && self.fanstudio.completed
     }
 
     async fn abort_and_reap(&mut self) -> Result<()> {
-        let (server_result, dispatcher_result, wolfx_result, fanstudio_result) = tokio::join!(
+        let (
+            server_result,
+            event_runtime_result,
+            confirmation_result,
+            wolfx_result,
+            fanstudio_result,
+        ) = tokio::join!(
             self.server.abort_and_reap(),
-            self.dispatcher.abort_and_reap(),
+            self.event_runtime.abort_and_reap(),
+            self.subscription_confirmations.abort_and_reap(),
             self.wolfx.abort_and_reap(),
             self.fanstudio.abort_and_reap(),
         );
         let mut errors = Vec::new();
         collect_task_result(server_result, &mut errors);
-        collect_task_result(dispatcher_result, &mut errors);
+        collect_task_result(event_runtime_result, &mut errors);
+        collect_task_result(confirmation_result, &mut errors);
         collect_task_result(wolfx_result, &mut errors);
         collect_task_result(fanstudio_result, &mut errors);
         finish_task_results(errors)
@@ -176,19 +220,45 @@ impl ShutdownSignals {
 pub(crate) async fn run_until_shutdown(
     listener: tokio::net::TcpListener,
     app: Router,
-    db: Database,
-    dispatcher: DisasterDispatcher,
-    wolfx: WolfxSource,
-    fanstudio: FanStudioSource,
+    services: RuntimeServices,
     shutdown_timeout: Duration,
 ) -> Result<()> {
+    let RuntimeServices {
+        storage,
+        event_runtime,
+        subscription_confirmations,
+        wolfx,
+        fanstudio,
+    } = services;
     let mut shutdown_signals = ShutdownSignals::new()?;
-    let dispatcher_for_shutdown = dispatcher.clone();
+    let event_runtime_for_shutdown = event_runtime.clone();
+    let confirmations_for_shutdown = subscription_confirmations.clone();
     let (provider_shutdown, provider_shutdown_receiver) = watch::channel(false);
-    let dispatcher_task = tokio::spawn(async move {
-        dispatcher.run().await.context("dispatcher task failed")?;
-        Ok::<_, anyhow::Error>("dispatcher")
+    let event_runtime_task = tokio::spawn(async move {
+        event_runtime
+            .run()
+            .await
+            .context("event_runtime task failed")?;
+        Ok::<_, anyhow::Error>("event_runtime")
     });
+    let subscription_confirmation_task = tokio::spawn(async move {
+        subscription_confirmations
+            .run()
+            .await
+            .context("subscription confirmation task failed")?;
+        Ok::<_, anyhow::Error>("subscription confirmations")
+    });
+    let (http_shutdown, http_shutdown_receiver) = oneshot::channel();
+    let server_task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _result = http_shutdown_receiver.await;
+            })
+            .await
+            .context("HTTP server failed")?;
+        Ok::<_, anyhow::Error>("HTTP server")
+    });
+    tokio::task::yield_now().await;
     let wolfx_shutdown = provider_shutdown_receiver.clone();
     let wolfx_task = tokio::spawn(async move {
         wolfx
@@ -204,17 +274,13 @@ pub(crate) async fn run_until_shutdown(
             .context("Fan Studio provider failed")?;
         Ok("Fan Studio provider")
     });
-    let (http_shutdown, http_shutdown_receiver) = oneshot::channel();
-    let server_task = tokio::spawn(async move {
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async {
-                let _result = http_shutdown_receiver.await;
-            })
-            .await
-            .context("HTTP server failed")?;
-        Ok::<_, anyhow::Error>("HTTP server")
-    });
-    let mut tasks = ManagedTasks::new(server_task, dispatcher_task, wolfx_task, fanstudio_task);
+    let mut tasks = ManagedTasks::new(
+        server_task,
+        event_runtime_task,
+        subscription_confirmation_task,
+        wolfx_task,
+        fanstudio_task,
+    );
 
     let (run_result, completed_task) = tokio::select! {
         signal = shutdown_signals.recv() => (signal, None),
@@ -222,9 +288,13 @@ pub(crate) async fn run_until_shutdown(
             unexpected_task_completion(result),
             Some(TaskKind::HttpServer),
         ),
-        result = &mut tasks.dispatcher.handle => (
+        result = &mut tasks.event_runtime.handle => (
             unexpected_task_completion(result),
-            Some(TaskKind::Dispatcher),
+            Some(TaskKind::EventRuntime),
+        ),
+        result = &mut tasks.subscription_confirmations.handle => (
+            unexpected_task_completion(result),
+            Some(TaskKind::SubscriptionConfirmations),
         ),
         result = &mut tasks.wolfx.handle => (
             unexpected_task_completion(result),
@@ -242,14 +312,18 @@ pub(crate) async fn run_until_shutdown(
     tracing::info!(event = "server.shutdown_started", "server.shutdown_started");
     let _result = http_shutdown.send(());
     let _result = provider_shutdown.send(true);
+    confirmations_for_shutdown.close();
 
-    let cleanup_result = drain_tasks(
-        &mut tasks,
-        &dispatcher_for_shutdown,
-        &mut shutdown_signals,
-        shutdown_timeout,
-    )
-    .await;
+    let ingress_result =
+        drain_ingress_tasks(&mut tasks, &mut shutdown_signals, shutdown_timeout).await;
+    event_runtime_for_shutdown.close().await;
+    let pipeline_result =
+        drain_pipeline_tasks(&mut tasks, &mut shutdown_signals, shutdown_timeout).await;
+    let cleanup_result = append_shutdown_result(
+        ingress_result,
+        pipeline_result,
+        "event pipeline shutdown failed",
+    );
     let cleanup_result = if tasks.all_completed() {
         cleanup_result
     } else {
@@ -266,7 +340,7 @@ pub(crate) async fn run_until_shutdown(
             "forced shutdown task cleanup failed",
         )
     };
-    let flush_result = flush_database(&db, &mut shutdown_signals, shutdown_timeout).await;
+    let flush_result = flush_storage(&storage, &mut shutdown_signals, shutdown_timeout).await;
     if cleanup_result.is_ok() && flush_result.is_ok() {
         tracing::info!(
             event = "server.shutdown_complete",
@@ -284,36 +358,35 @@ pub(crate) async fn run_until_shutdown(
     combine_shutdown_results(run_result, cleanup_result, flush_result)
 }
 
-async fn drain_tasks(
+async fn drain_ingress_tasks(
     tasks: &mut ManagedTasks,
-    dispatcher: &DisasterDispatcher,
     shutdown_signals: &mut ShutdownSignals,
     timeout: Duration,
 ) -> Result<()> {
-    let mut dispatcher_closed = false;
     let mut errors = Vec::new();
     let deadline = tokio::time::sleep(timeout);
     tokio::pin!(deadline);
 
     loop {
-        if tasks.providers_completed() && !dispatcher_closed {
-            dispatcher.close().await;
-            dispatcher_closed = true;
-        }
-        if tasks.all_completed() {
+        if tasks.ingress_completed() {
             return finish_task_results(errors);
         }
 
         let server_pending = !tasks.server.completed;
-        let dispatcher_pending = dispatcher_closed && !tasks.dispatcher.completed;
+        let event_runtime_pending = !tasks.event_runtime.completed;
+        let confirmations_pending = !tasks.subscription_confirmations.completed;
         let wolfx_pending = !tasks.wolfx.completed;
         let fanstudio_pending = !tasks.fanstudio.completed;
         tokio::select! {
             result = &mut tasks.server.handle, if server_pending => {
                 tasks.server.collect_completion(result, &mut errors);
             }
-            result = &mut tasks.dispatcher.handle, if dispatcher_pending => {
-                tasks.dispatcher.collect_completion(result, &mut errors);
+            result = &mut tasks.event_runtime.handle, if event_runtime_pending => {
+                tasks.event_runtime.collect_completion(result, &mut errors);
+                errors.push(anyhow::anyhow!("event_runtime terminated before ingress stopped"));
+            }
+            result = &mut tasks.subscription_confirmations.handle, if confirmations_pending => {
+                tasks.subscription_confirmations.collect_completion(result, &mut errors);
             }
             result = &mut tasks.wolfx.handle, if wolfx_pending => {
                 tasks.wolfx.collect_completion(result, &mut errors);
@@ -322,12 +395,9 @@ async fn drain_tasks(
                 tasks.fanstudio.collect_completion(result, &mut errors);
             }
             () = &mut deadline => {
-                tracing::warn!(event = "server.shutdown_timed_out", timeout_seconds = timeout.as_secs(), "server.shutdown_timed_out");
+                tracing::warn!(event = "server.ingress_shutdown_timed_out", "server.ingress_shutdown_timed_out");
                 return append_shutdown_result(
-                    Err(anyhow::anyhow!(
-                        "graceful shutdown timed out after {} seconds",
-                        timeout.as_secs()
-                    )),
+                    Err(anyhow::anyhow!("ingress shutdown deadline expired")),
                     finish_task_results(errors),
                     "shutdown task failed",
                 );
@@ -337,6 +407,65 @@ async fn drain_tasks(
                     Ok(()) => {
                         tracing::warn!(event = "server.shutdown_forced", "server.shutdown_forced");
                         Err(anyhow::anyhow!("graceful shutdown interrupted by a second signal"))
+                    }
+                    Err(error) => Err(error.context("failed to listen for a second shutdown signal")),
+                };
+                return append_shutdown_result(
+                    signal_result,
+                    finish_task_results(errors),
+                    "shutdown task failed",
+                );
+            }
+        }
+    }
+}
+
+async fn drain_pipeline_tasks(
+    tasks: &mut ManagedTasks,
+    shutdown_signals: &mut ShutdownSignals,
+    timeout: Duration,
+) -> Result<()> {
+    let mut errors = Vec::new();
+    let deadline = tokio::time::sleep(timeout);
+    tokio::pin!(deadline);
+    loop {
+        if tasks.all_completed() {
+            return finish_task_results(errors);
+        }
+        let server_pending = !tasks.server.completed;
+        let event_runtime_pending = !tasks.event_runtime.completed;
+        let confirmations_pending = !tasks.subscription_confirmations.completed;
+        let wolfx_pending = !tasks.wolfx.completed;
+        let fanstudio_pending = !tasks.fanstudio.completed;
+        tokio::select! {
+            result = &mut tasks.server.handle, if server_pending => {
+                tasks.server.collect_completion(result, &mut errors);
+            }
+            result = &mut tasks.event_runtime.handle, if event_runtime_pending => {
+                tasks.event_runtime.collect_completion(result, &mut errors);
+            }
+            result = &mut tasks.subscription_confirmations.handle, if confirmations_pending => {
+                tasks.subscription_confirmations.collect_completion(result, &mut errors);
+            }
+            result = &mut tasks.wolfx.handle, if wolfx_pending => {
+                tasks.wolfx.collect_completion(result, &mut errors);
+            }
+            result = &mut tasks.fanstudio.handle, if fanstudio_pending => {
+                tasks.fanstudio.collect_completion(result, &mut errors);
+            }
+            () = &mut deadline => {
+                tracing::warn!(event = "server.pipeline_shutdown_timed_out", "server.pipeline_shutdown_timed_out");
+                return append_shutdown_result(
+                    Err(anyhow::anyhow!("event pipeline shutdown deadline expired")),
+                    finish_task_results(errors),
+                    "shutdown task failed",
+                );
+            }
+            signal = shutdown_signals.recv() => {
+                let signal_result = match signal {
+                    Ok(()) => {
+                        tracing::warn!(event = "server.shutdown_forced", "server.shutdown_forced");
+                        Err(anyhow::anyhow!("event pipeline shutdown interrupted by a second signal"))
                     }
                     Err(error) => Err(error.context("failed to listen for a second shutdown signal")),
                 };
@@ -391,46 +520,36 @@ fn finish_task_results(mut errors: Vec<anyhow::Error>) -> Result<()> {
     }
 }
 
-async fn flush_database(
-    db: &Database,
+async fn flush_storage(
+    storage: &Storage,
     shutdown_signals: &mut ShutdownSignals,
     timeout: Duration,
 ) -> Result<()> {
-    let flush = db.flush();
+    let flush = storage.flush();
     tokio::pin!(flush);
-    let deadline = tokio::time::sleep(timeout);
-    tokio::pin!(deadline);
-    let mut deadline_observed = false;
-    let mut signal_observed = false;
-    let mut errors = Vec::new();
-    let flush_result = loop {
-        tokio::select! {
-            result = &mut flush => break result.context("failed to flush database during shutdown"),
-            () = &mut deadline, if !deadline_observed => {
-                deadline_observed = true;
+    let flush_deadline = tokio::time::sleep(timeout);
+    tokio::pin!(flush_deadline);
+    let flush_result = tokio::select! {
+            biased;
+            result = &mut flush => result.context("failed to flush database during shutdown"),
+            () = &mut flush_deadline => {
                 tracing::warn!(event = "server.database_flush_timed_out", "server.database_flush_timed_out");
-                errors.push(anyhow::anyhow!("database flush exceeded the shutdown timeout"));
+                Err(anyhow::anyhow!("database flush exceeded the shutdown deadline"))
             }
-            signal = shutdown_signals.recv(), if !signal_observed => {
-                signal_observed = true;
+            signal = shutdown_signals.recv() => {
                 match signal {
                     Ok(()) => {
                         tracing::warn!(
                             event = "server.shutdown_signal_during_flush",
                             "server.shutdown_signal_during_flush"
                         );
-                        errors.push(anyhow::anyhow!("database flush interrupted by a shutdown signal"));
+                        Err(anyhow::anyhow!("database flush interrupted by a shutdown signal"))
                     }
-                    Err(error) => errors.push(error.context("failed to listen for a shutdown signal during database flush")),
+                    Err(error) => Err(error.context("failed to listen for a shutdown signal during database flush")),
                 }
             }
-        }
     };
-    append_shutdown_result(
-        finish_task_results(errors),
-        flush_result,
-        "database flush failed",
-    )
+    flush_result
 }
 
 fn append_shutdown_result(
