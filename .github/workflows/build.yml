@@ -59,8 +59,8 @@ jobs:
         with:
           usesh: true
           prepare: |
-            pkg install -y rustup
-            rustup-init -y
+            fetch -o rustup-init.sh https://sh.rustup.rs
+            sh rustup-init.sh -y
           run: |
             . $HOME/.cargo/env
             cargo build --release
