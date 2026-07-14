@@ -1,0 +1,139 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main, noctiro]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release 版本号 (如 v0.2.0)，留空则自动生成"
+        required: false
+        type: string
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+
+      - name: Build
+        run: cargo build --release
+        env:
+          RUSTFLAGS: -C target-cpu=x86-64
+          CFLAGS: -march=x86-64
+          CXXFLAGS: -march=x86-64
+
+      # ----------------------------------------------------
+      # 拆分上传：确保不带任何多余的父级目录结构
+      # ----------------------------------------------------
+      - name: Upload artifact (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: earthquake-alert-backend-linux-artifact
+          path: target/release/disaster-alert
+
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: earthquake-alert-backend-windows-artifact
+          path: target/release/disaster-alert.exe
+
+  freebsd-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build in FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            pkg install -y curl
+            fetch -o rustup-init.sh https://sh.rustup.rs
+            sh rustup-init.sh -y
+          run: |
+            . $HOME/.cargo/env
+            cargo build --release
+
+      - name: Upload artifact (FreeBSD)
+        uses: actions/upload-artifact@v4
+        with:
+          name: earthquake-alert-backend-freebsd-artifact
+          path: target/release/disaster-alert
+
+  release:
+    needs: [build, freebsd-build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # packages: write # (已移除 Docker 发布，无需 packages 权限)
+    steps:
+      - uses: actions/checkout@v4
+
+      # ----------------------------------------------------
+      # 分别下载两个平台的二进制文件
+      # ----------------------------------------------------
+      - uses: actions/download-artifact@v4
+        with:
+          name: earthquake-alert-backend-linux-artifact
+          path: release/linux
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: earthquake-alert-backend-windows-artifact
+          path: release/windows
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: earthquake-alert-backend-freebsd-artifact
+          path: release/freebsd
+
+      - name: Generate tag
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "tag=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=v$(date +%Y%m%d.%H%M%S)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      # ----------------------------------------------------
+      # 重命名文件，准备发布
+      # ----------------------------------------------------
+      - name: Prepare files for Release
+        run: |
+          SHA=${{ steps.sha.outputs.short }}
+          mv release/linux/disaster-alert "earthquake-alert-backend-linux-${SHA}"
+          mv release/windows/disaster-alert.exe "earthquake-alert-backend-windows-${SHA}.exe"
+          mv release/freebsd/disaster-alert "earthquake-alert-backend-freebsd-${SHA}"
+          chmod +x "earthquake-alert-backend-linux-${SHA}"
+          chmod +x "earthquake-alert-backend-freebsd-${SHA}"
+
+      # ----------------------------------------------------
+      # 创建 GitHub Release
+      # ----------------------------------------------------
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Release ${{ steps.tag.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            earthquake-alert-backend-linux-*
+            earthquake-alert-backend-windows-*.exe
+            earthquake-alert-backend-freebsd-*
