@@ -59,6 +59,7 @@ jobs:
         with:
           usesh: true
           prepare: |
+            pkg install -y curl
             fetch -o rustup-init.sh https://sh.rustup.rs
             sh rustup-init.sh -y
           run: |
