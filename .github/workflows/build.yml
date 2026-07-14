@@ -32,6 +32,12 @@ jobs:
           CFLAGS: -march=x86-64
           CXXFLAGS: -march=x86-64
 
+      - name: Build migration tool
+        if: runner.os == 'Linux'
+        run: cargo build --release --features migration --bin disaster-alert-migrate
+        env:
+          RUSTFLAGS: -C target-cpu=x86-64
+
       # ----------------------------------------------------
       # 拆分上传：确保不带任何多余的父级目录结构
       # ----------------------------------------------------
@@ -41,6 +47,13 @@ jobs:
         with:
           name: earthquake-alert-backend-linux-artifact
           path: target/release/disaster-alert
+
+      - name: Upload migration artifact
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-tool-linux-artifact
+          path: target/release/disaster-alert-migrate
 
       - name: Upload artifact (Windows)
         if: runner.os == 'Windows'
@@ -99,6 +112,11 @@ jobs:
           name: earthquake-alert-backend-freebsd-artifact
           path: release/freebsd
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: migration-tool-linux-artifact
+          path: release/linux
+
       - name: Generate tag
         id: tag
         run: |
@@ -121,8 +139,10 @@ jobs:
           mv release/linux/disaster-alert "earthquake-alert-backend-linux-${SHA}"
           mv release/windows/disaster-alert.exe "earthquake-alert-backend-windows-${SHA}.exe"
           mv release/freebsd/disaster-alert "earthquake-alert-backend-freebsd-${SHA}"
+          mv release/linux/disaster-alert-migrate "earthquake-alert-migration-linux-${SHA}"
           chmod +x "earthquake-alert-backend-linux-${SHA}"
           chmod +x "earthquake-alert-backend-freebsd-${SHA}"
+          chmod +x "earthquake-alert-migration-linux-${SHA}"
 
       # ----------------------------------------------------
       # 创建 GitHub Release
@@ -137,3 +157,4 @@ jobs:
             earthquake-alert-backend-linux-*
             earthquake-alert-backend-windows-*.exe
             earthquake-alert-backend-freebsd-*
+            earthquake-alert-migration-linux-*
