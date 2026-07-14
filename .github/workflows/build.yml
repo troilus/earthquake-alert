@@ -49,8 +49,28 @@ jobs:
           name: earthquake-alert-backend-windows-artifact
           path: target/release/disaster-alert.exe
 
+  freebsd-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build in FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            pkg install -y rust
+          run: |
+            cargo build --release
+
+      - name: Upload artifact (FreeBSD)
+        uses: actions/upload-artifact@v4
+        with:
+          name: earthquake-alert-backend-freebsd-artifact
+          path: target/release/disaster-alert
+
   release:
-    needs: build
+    needs: [build, freebsd-build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -64,10 +84,17 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: earthquake-alert-backend-linux-artifact
+          path: release/linux
 
       - uses: actions/download-artifact@v4
         with:
           name: earthquake-alert-backend-windows-artifact
+          path: release/windows
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: earthquake-alert-backend-freebsd-artifact
+          path: release/freebsd
 
       - name: Generate tag
         id: tag
@@ -88,9 +115,11 @@ jobs:
       - name: Prepare files for Release
         run: |
           SHA=${{ steps.sha.outputs.short }}
-          mv disaster-alert "earthquake-alert-backend-linux-${SHA}"
-          mv disaster-alert.exe "earthquake-alert-backend-windows-${SHA}.exe"
+          mv release/linux/disaster-alert "earthquake-alert-backend-linux-${SHA}"
+          mv release/windows/disaster-alert.exe "earthquake-alert-backend-windows-${SHA}.exe"
+          mv release/freebsd/disaster-alert "earthquake-alert-backend-freebsd-${SHA}"
           chmod +x "earthquake-alert-backend-linux-${SHA}"
+          chmod +x "earthquake-alert-backend-freebsd-${SHA}"
 
       # ----------------------------------------------------
       # 创建 GitHub Release
@@ -104,3 +133,4 @@ jobs:
           files: |
             earthquake-alert-backend-linux-*
             earthquake-alert-backend-windows-*.exe
+            earthquake-alert-backend-freebsd-*
