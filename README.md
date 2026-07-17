@@ -1,3 +1,14 @@
+# 快捷自用部署教程
+1. 在 https://github.com/troilus/earthquake-alert/releases 下载Windows或其他平台程序
+2. 新建一个 .env 文件（注意扩展名就是env！），内容复制 https://github.com/troilus/earthquake-alert/blob/main/.env.example 中所有的粘贴进去
+3. 自己用可以不改：（按需修改 .env 文件内容，详见下文| 变量 | 默认值 | 说明 |表格中的说明）
+4. 运行程序
+5. 浏览器访问 http://127.0.0.1:30010 访问主页
+6. 填入Bark key，按需配置，保存！
+    1. Bark key 获取：
+    2. 下载 Bark APP，点击注册设备
+    3. https://api.day.app/xsdasfadsfkjhdklfsklg/ 中的 xsdasfadsfkjhdklfsklg 就是Bark key
+
 # 灾害预警 Bark 订阅系统
 
 基于 Rust 长驻后端的多渠道灾害实时推送服务。后端同时监听 Wolfx 地震预警和 FAN Studio `/all` WebSocket，将不同来源统一分类、跨渠道去重，再按订阅者地点和灾种规则通过 Bark 推送。
