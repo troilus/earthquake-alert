@@ -57,8 +57,6 @@ async fn run() -> Result<()> {
         server_host = %config.server_host,
         server_port = config.server_port,
         db_path = %config.db_path,
-        wolfx_websocket_url = %config.wolfx_websocket_url,
-        fanstudio_websocket_url = %config.fanstudio_websocket_url,
         max_concurrent_notifications = config.max_concurrent_notifications,
         http_pool_size = config.http_pool_size,
         "config.loaded"

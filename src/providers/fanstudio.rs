@@ -17,11 +17,11 @@ use tokio_tungstenite::{
 };
 
 const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
+const FANSTUDIO_WEBSOCKET_URL: &str = "wss://ws.fanstudio.tech/all";
 
 #[derive(Clone)]
 pub(crate) struct FanStudioSource {
     event_runtime: EventRuntime,
-    websocket_url: String,
     reconnect_min: Duration,
     reconnect_max: Duration,
     runtime_status: RuntimeStatus,
@@ -35,7 +35,6 @@ impl FanStudioSource {
     ) -> Self {
         Self {
             event_runtime,
-            websocket_url: config.fanstudio_websocket_url.clone(),
             reconnect_min: Duration::from_secs(config.reconnect_min_seconds),
             reconnect_max: Duration::from_secs(config.reconnect_max_seconds),
             runtime_status,
@@ -82,7 +81,7 @@ impl FanStudioSource {
         let connect = tokio::time::timeout(
             Duration::from_secs(10),
             connect_async_with_config(
-                &self.websocket_url,
+                FANSTUDIO_WEBSOCKET_URL,
                 Some(
                     WebSocketConfig::default()
                         .max_message_size(Some(MAX_WEBSOCKET_MESSAGE_BYTES))
@@ -103,7 +102,7 @@ impl FanStudioSource {
         let connected_at = Instant::now();
         tracing::info!(
             event = "fanstudio.connected",
-            websocket_url = %self.websocket_url,
+            websocket_url = FANSTUDIO_WEBSOCKET_URL,
             "fanstudio.connected"
         );
         let (mut write, mut read) = socket.split();

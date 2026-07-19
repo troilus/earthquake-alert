@@ -150,8 +150,6 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `WOLFX_WEBSOCKET_URL` | `wss://ws-api.wolfx.jp/all_eew` | Wolfx 地震预警地址 |
-| `FANSTUDIO_WEBSOCKET_URL` | `wss://ws.fanstudio.tech/all` | FAN Studio 聚合数据地址 |
 | `RECONNECT_MIN_SECONDS` | `1` | 数据源断开后的最小重连间隔 |
 | `RECONNECT_MAX_SECONDS` | `30` | 数据源断开后的最大重连间隔 |
 | `PUSH_UPDATES` | `false` | 是否推送同一事件的后续报告 |
