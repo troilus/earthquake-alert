@@ -15,7 +15,10 @@ use crate::subscriptions::{
 use crate::utils::distance;
 use axum::{
     Json,
-    extract::{Query, State, rejection::JsonRejection},
+    extract::{
+        Query, State,
+        rejection::{JsonRejection, QueryRejection},
+    },
     http::StatusCode,
     response::IntoResponse,
 };
@@ -25,9 +28,11 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 const MAX_LOCATIONS: usize = 3;
 const MAX_LOCATION_NAME_CHARS: usize = 80;
+const INSTANCE_TERMS_REQUIRED_MESSAGE: &str = "当前实例尚未确认部署责任，暂不接受新增或覆盖订阅";
 
 #[derive(Clone)]
 pub(crate) struct AppState {
+    pub(crate) instance_terms_accepted: bool,
     pub(crate) storage: Storage,
     subscriptions: SubscriptionManager,
     bark_notifier: BarkNotifier,
@@ -55,6 +60,7 @@ impl AppState {
         let subscriptions = storage.subscription_manager();
         let bark_urls = bark_notifier.allowed_bark_urls();
         Self {
+            instance_terms_accepted: false,
             storage,
             subscriptions,
             bark_notifier,
@@ -73,6 +79,11 @@ impl AppState {
             subscription_confirmations,
         }
     }
+
+    pub(crate) fn with_instance_terms_accepted(mut self, accepted: bool) -> Self {
+        self.instance_terms_accepted = accepted;
+        self
+    }
 }
 
 #[derive(Deserialize)]
@@ -83,8 +94,12 @@ pub(crate) struct ReverseGeocodeQuery {
 
 pub(crate) async fn reverse_geocode_handler(
     State(state): State<AppState>,
-    Query(query): Query<ReverseGeocodeQuery>,
+    query: Result<Query<ReverseGeocodeQuery>, QueryRejection>,
 ) -> impl IntoResponse {
+    let query = match parse_reverse_geocode_query(query) {
+        Ok(query) => query,
+        Err(response) => return (StatusCode::BAD_REQUEST, Json(response)),
+    };
     if !distance::validate_coordinates(query.latitude, query.longitude) {
         return (
             StatusCode::BAD_REQUEST,
@@ -118,10 +133,21 @@ pub(crate) async fn reverse_geocode_handler(
     }
 }
 
+fn parse_reverse_geocode_query(
+    query: Result<Query<ReverseGeocodeQuery>, QueryRejection>,
+) -> Result<ReverseGeocodeQuery, ApiResponse<ReverseGeocodeResult>> {
+    query
+        .map(|Query(query)| query)
+        .map_err(|_| ApiResponse::error("坐标参数无效"))
+}
+
 pub(crate) async fn subscribe_handler(
     State(state): State<AppState>,
     payload: Result<Json<SubscribeRequest>, JsonRejection>,
 ) -> impl IntoResponse {
+    if let Err(response) = require_subscription_creation_enabled(state.instance_terms_accepted) {
+        return response;
+    }
     let Json(payload) = match payload {
         Ok(payload) => payload,
         Err(_) => {
@@ -277,6 +303,19 @@ pub(crate) async fn subscribe_handler(
                 )),
             )
         }
+    }
+}
+
+fn require_subscription_creation_enabled(
+    instance_terms_accepted: bool,
+) -> std::result::Result<(), (StatusCode, Json<ApiResponse<SubscribeResponse>>)> {
+    if instance_terms_accepted {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ApiResponse::error(INSTANCE_TERMS_REQUIRED_MESSAGE)),
+        ))
     }
 }
 
@@ -584,6 +623,20 @@ mod tests {
     }
 
     #[test]
+    fn reverse_geocode_query_rejection_uses_the_api_envelope() {
+        let uri = axum::http::Uri::from_static("/api/reverse-geocode?latitude=31.2");
+        let query = Query::<ReverseGeocodeQuery>::try_from_uri(&uri);
+        let response = match parse_reverse_geocode_query(query) {
+            Ok(_) => panic!("missing longitude should be rejected"),
+            Err(response) => response,
+        };
+
+        assert!(!response.success);
+        assert_eq!(response.message, "坐标参数无效");
+        assert!(response.data.is_none());
+    }
+
+    #[test]
     fn subscription_admission_rejects_before_external_work_when_saturated() {
         let concurrency = Arc::new(Semaphore::new(1));
         let held = try_acquire_subscription_slot(&concurrency);
@@ -591,6 +644,20 @@ mod tests {
         assert!(try_acquire_subscription_slot(&concurrency).is_err());
         drop(held);
         assert!(try_acquire_subscription_slot(&concurrency).is_ok());
+    }
+
+    #[test]
+    fn subscription_creation_requires_accepted_instance_terms() {
+        assert!(require_subscription_creation_enabled(true).is_ok());
+
+        let result = require_subscription_creation_enabled(false);
+        assert!(result.is_err());
+        if let Err((status, Json(response))) = result {
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+            assert!(!response.success);
+            assert_eq!(response.message, INSTANCE_TERMS_REQUIRED_MESSAGE);
+            assert!(response.data.is_none());
+        }
     }
 
     #[test]

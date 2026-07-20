@@ -6,18 +6,65 @@ use crate::routes::detail_page::{
 };
 use axum::{
     extract::{Path, State},
+    http::{HeaderValue, header},
     response::{Html, IntoResponse, Response},
 };
+use std::sync::OnceLock;
 
 const INDEX_HTML: &str = include_str!(concat!(env!("OUT_DIR"), "/index.min.html"));
+const INSTANCE_NOTICE_MARKER: &str = "__DISASTER_ALERT_INSTANCE_NOTICE__";
+const INSTANCE_TERMS_NOTICE: &str = r#"
+<dialog id="instance-terms-dialog" class="instance-terms-dialog" aria-labelledby="instance-terms-title" aria-describedby="instance-terms-summary" open>
+  <div class="instance-terms-heading">
+    <span class="instance-terms-icon" aria-hidden="true">!</span>
+    <div>
+      <span class="instance-terms-eyebrow">实例配置提醒</span>
+      <h2 id="instance-terms-title">当前实例尚未确认部署责任声明</h2>
+    </div>
+  </div>
+  <p id="instance-terms-summary">此实例未设置 <code>INSTANCE_TERMS_ACCEPTED=true</code>。服务仍在运行，但新增和覆盖订阅已在服务端禁用。</p>
+  <ul>
+    <li>项目维护者仅提供可自部署的软件，不运营、控制或认可本实例提供的实时灾害信息、订阅或通知服务。</li>
+    <li>启用实时数据或向他人提供服务前，部署者应自行核查适用法律法规，并取得所需许可、数据授权和个人信息处理依据；自部署不等于获准公开发布预警。</li>
+    <li>信息可能延迟、缺失或误报，不属于官方预警，也不应作为唯一的安全决策依据。</li>
+    <li>已有订阅仍可取消；实例中已有的订阅和后台任务不会因本提示自动删除或停止。</li>
+  </ul>
+  <p class="instance-terms-note">本提示只反映环境变量状态，不能替代法律评估、主管部门许可或数据提供方授权。</p>
+  <div class="instance-terms-actions">
+    <a href="https://github.com/noctiro/disaster-alert#使用与部署责任" target="_blank" rel="noopener noreferrer">查看完整声明</a>
+    <button id="dismiss-instance-terms" class="primary" type="button">继续查看</button>
+  </div>
+</dialog>
+"#;
+static ACCEPTED_INDEX_HTML: OnceLock<String> = OnceLock::new();
+static UNACCEPTED_INDEX_HTML: OnceLock<String> = OnceLock::new();
 
 enum DetailLoadError {
     InvalidLink(anyhow::Error),
     Storage(anyhow::Error),
 }
 
-pub(crate) async fn index_handler() -> impl IntoResponse {
-    Html(INDEX_HTML)
+pub(crate) async fn index_handler(State(state): State<AppState>) -> Response {
+    index_response(state.instance_terms_accepted)
+}
+
+fn index_response(instance_terms_accepted: bool) -> Response {
+    let mut response = Html(render_index_html(instance_terms_accepted)).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+fn render_index_html(instance_terms_accepted: bool) -> &'static str {
+    let (rendered, notice) = if instance_terms_accepted {
+        (&ACCEPTED_INDEX_HTML, "")
+    } else {
+        (&UNACCEPTED_INDEX_HTML, INSTANCE_TERMS_NOTICE)
+    };
+    rendered
+        .get_or_init(|| INDEX_HTML.replace(INSTANCE_NOTICE_MARKER, notice))
+        .as_str()
 }
 
 pub(crate) async fn incident_detail_handler(
@@ -92,4 +139,39 @@ pub(crate) async fn incident_detail_handler(
         }
     };
     detail_response(render_incident_page(&snapshot, incident.as_deref()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{INSTANCE_NOTICE_MARKER, index_response, render_index_html};
+    use axum::http::header;
+
+    #[test]
+    fn accepted_instance_has_no_terms_dialog() {
+        let html = render_index_html(true);
+        assert!(!html.contains(INSTANCE_NOTICE_MARKER));
+        assert!(!html.contains("id=\"instance-terms-dialog\""));
+    }
+
+    #[test]
+    fn unaccepted_instance_has_terms_dialog() {
+        let html = render_index_html(false);
+        assert!(!html.contains(INSTANCE_NOTICE_MARKER));
+        assert!(html.contains("id=\"instance-terms-dialog\""));
+        assert!(html.contains("aria-describedby=\"instance-terms-summary\" open"));
+        assert!(html.contains("INSTANCE_TERMS_ACCEPTED=true"));
+        assert!(html.contains("新增和覆盖订阅已在服务端禁用"));
+    }
+
+    #[test]
+    fn index_response_is_not_cached() {
+        let response = index_response(false);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CACHE_CONTROL)
+                .and_then(|value| value.to_str().ok()),
+            Some("no-store")
+        );
+    }
 }

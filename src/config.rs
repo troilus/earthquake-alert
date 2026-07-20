@@ -22,6 +22,7 @@ pub(crate) fn load_dotenv() -> Result<Option<PathBuf>> {
 /// 应用配置
 #[derive(Debug)]
 pub(crate) struct Config {
+    pub(crate) instance_terms_accepted: bool,
     pub(crate) server_host: String,
     pub(crate) server_port: u16,
     pub(crate) shutdown_timeout_seconds: u64,
@@ -39,8 +40,6 @@ pub(crate) struct Config {
     pub(crate) delivery_ledger_retention_days: u64,
     pub(crate) operation_retention_days: u64,
     pub(crate) notification_context_retention_days: u64,
-    pub(crate) wolfx_websocket_url: String,
-    pub(crate) fanstudio_websocket_url: String,
     pub(crate) reconnect_min_seconds: u64,
     pub(crate) reconnect_max_seconds: u64,
     pub(crate) push_updates: bool,
@@ -65,6 +64,7 @@ impl Config {
             .map_or(32, |threads| threads.get().saturating_mul(16))
             .clamp(16, 256);
         let config = Self {
+            instance_terms_accepted: env_bool("INSTANCE_TERMS_ACCEPTED", false)?,
             server_host: env_string("SERVER_HOST", "0.0.0.0"),
             server_port: env_parse("SERVER_PORT", 30010)?,
             shutdown_timeout_seconds: env_parse("SHUTDOWN_TIMEOUT_SECONDS", 15)?,
@@ -87,11 +87,6 @@ impl Config {
                 "NOTIFICATION_CONTEXT_RETENTION_DAYS",
                 365,
             )?,
-            wolfx_websocket_url: env_string("WOLFX_WEBSOCKET_URL", "wss://ws-api.wolfx.jp/all_eew"),
-            fanstudio_websocket_url: env_string(
-                "FANSTUDIO_WEBSOCKET_URL",
-                "wss://ws.fanstudio.tech/all",
-            ),
             reconnect_min_seconds: env_parse("RECONNECT_MIN_SECONDS", 1)?,
             reconnect_max_seconds: env_parse("RECONNECT_MAX_SECONDS", 30)?,
             push_updates: env_bool("PUSH_UPDATES", false)?,
@@ -117,12 +112,6 @@ impl Config {
     }
 
     fn validate(&self) -> Result<()> {
-        validate_websocket_url("WOLFX_WEBSOCKET_URL", &self.wolfx_websocket_url, None)?;
-        validate_websocket_url(
-            "FANSTUDIO_WEBSOCKET_URL",
-            &self.fanstudio_websocket_url,
-            Some("/all"),
-        )?;
         if self.reconnect_min_seconds == 0 {
             bail!("RECONNECT_MIN_SECONDS must be greater than 0");
         }
@@ -246,23 +235,6 @@ fn validate_http_url(name: &str, value: &str) -> Result<()> {
         || parsed.fragment().is_some()
     {
         bail!("{name} must be an HTTP(S) URL without credentials, query, or fragment");
-    }
-    Ok(())
-}
-
-fn validate_websocket_url(name: &str, value: &str, required_path: Option<&str>) -> Result<()> {
-    let parsed = Url::parse(value).with_context(|| format!("invalid {name}"))?;
-    if !matches!(parsed.scheme(), "ws" | "wss")
-        || parsed.host_str().is_none()
-        || parsed.username() != ""
-        || parsed.password().is_some()
-        || parsed.query().is_some()
-        || parsed.fragment().is_some()
-    {
-        bail!("{name} must be a WS(S) URL without credentials, query, or fragment");
-    }
-    if required_path.is_some_and(|path| parsed.path() != path) {
-        bail!("{name} must use the /all endpoint");
     }
     Ok(())
 }
